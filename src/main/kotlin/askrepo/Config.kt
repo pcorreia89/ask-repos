@@ -46,6 +46,9 @@ data class Config(
     val topK: Int,
     val maxTokens: Int,
     val indexBase: Path,
+    val adminUser: String,
+    val adminPassword: String,
+    val adminPort: Int,
     val slackBotToken: String?,
     val slackAppToken: String?,
     val bitbucketToken: String?,
@@ -74,6 +77,9 @@ data class Config(
 
             val defaultBase = Path.of(System.getProperty("user.home"), ".ask-repos", "indexes")
             return Config(
+                adminUser = env["ADMIN_USER"]?.takeIf { it.isNotBlank() } ?: "admin",
+                adminPassword = env["ADMIN_PASSWORD"]?.takeIf { it.isNotBlank() } ?: "admin",
+                adminPort = env["ADMIN_PORT"]?.toIntOrNull() ?: 3000,
                 anthropicApiKey = anthropic,
                 voyageApiKey = voyage,
                 anthropicModel = env["ANTHROPIC_MODEL"]?.takeIf { it.isNotBlank() }
