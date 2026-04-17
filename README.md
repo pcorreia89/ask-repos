@@ -163,6 +163,44 @@ In Slack, mention the bot with a question:
    `SLACK_BOT_TOKEN`.
 6. Add both tokens to `.env` and run `./ask-repos serve`.
 
+## Deployment (Docker on EC2)
+
+### What you need
+
+- An EC2 instance (or any Linux host) with **Docker** and **Docker Compose** installed.
+- API keys: `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`.
+- Git provider token(s): `GITHUB_TOKEN` and/or `BITBUCKET_TOKEN`.
+- Slack app tokens: `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` (see [Slack app setup](#slack-app-setup) below).
+
+### Steps
+
+```sh
+# 1. Clone the repo on the server
+git clone <repo-url>
+cd ask-repos
+
+# 2. Create .env from the example and fill in your keys
+cp .env.example .env
+# edit .env — at minimum set the API keys and Slack tokens
+
+# 3. Start the service
+docker compose up -d
+```
+
+The admin UI is now available at `http://<server-ip>:3000/admin`
+(default login: `admin` / `admin` — change via `ADMIN_USER` / `ADMIN_PASSWORD` in `.env`).
+
+### Configure repos and channels
+
+1. Open `http://<server-ip>:3000/admin` in a browser.
+2. Log in with the admin credentials.
+3. Click **Add Repo** and fill in the provider, workspace, repo name, branch, and Slack channel IDs.
+4. Click **Sync** on a repo to index it immediately.
+5. The Slack bot is live — users can `@ask-repos` in the configured channels.
+
+The admin UI works even without Slack tokens, so you can configure repos
+first, then add the tokens and restart (`docker compose restart`).
+
 ### Exit codes
 
 - `1` — usage error (unknown command, missing argument).
