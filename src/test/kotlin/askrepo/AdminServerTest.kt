@@ -180,4 +180,70 @@ class AdminServerTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertContains(response.bodyAsText(), "sync started")
     }
+
+    @Test
+    fun webhookDisabledWhenNoSecretConfigured() {
+        val base = Files.createTempDirectory("admin-test")
+        val config = testConfig(base).copy(webhookSecret = null)
+        Files.createDirectories(config.indexBase)
+        testApplication {
+            application { with(AdminServer) { configure(config) } }
+            val entries = listOf(RepoEntry("my-repo", "github", "acme", "backend"))
+            RepoManager.saveRegistry(config, RepoRegistry(entries))
+            val response = client.post("/webhook/my-repo?secret=anything")
+            assertEquals(HttpStatusCode.NotFound, response.status)
+        }
+        base.toFile().deleteRecursively()
+    }
+
+    @Test
+    fun addRepoRejectsInvalidName() = adminTest { _ ->
+        val response = authPost("/admin/repos/add", "name=../evil&provider=github&workspace=org&repo=myrepo&branch=main&channels=")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertContains(response.bodyAsText(), "Invalid")
+    }
+
+    @Test
+    fun addRepoRejectsInvalidWorkspace() = adminTest { _ ->
+        val response = authPost("/admin/repos/add", "name=good-name&provider=github&workspace=../evil&repo=myrepo&branch=main&channels=")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertContains(response.bodyAsText(), "Invalid")
+    }
+
+    @Test
+    fun addRepoRejectsInvalidRepo() = adminTest { _ ->
+        val response = authPost("/admin/repos/add", "name=good-name&provider=github&workspace=org&repo=evil%2F..&branch=main&channels=")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertContains(response.bodyAsText(), "Invalid")
+    }
+
+    @Test
+    fun addRepoRejectsInvalidBranch() = adminTest { _ ->
+        val response = authPost("/admin/repos/add", "name=good-name&provider=github&workspace=org&repo=myrepo&branch=--evil&channels=")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertContains(response.bodyAsText(), "Invalid")
+    }
+
+    @Test
+    fun addRepoRejectsInvalidProvider() = adminTest { _ ->
+        val response = authPost("/admin/repos/add", "name=good-name&provider=evil&workspace=org&repo=myrepo&branch=main&channels=")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertContains(response.bodyAsText(), "Invalid")
+    }
+
+    @Test
+    fun addRepoAcceptsValidNames() = adminTest { _ ->
+        val response = authPost("/admin/repos/add", "name=my-repo_1.0&provider=github&workspace=my-org&repo=my.repo&branch=feature/foo&channels=")
+        assertEquals(HttpStatusCode.Found, response.status)
+    }
+
+    @Test
+    fun adminActionsAreLogged() = adminTest { config ->
+        AdminServer.clearAuditLogs()
+        authPost("/admin/repos/add", "name=logged-repo&provider=github&workspace=org&repo=myrepo&branch=main&channels=")
+        authPost("/admin/repos/logged-repo/delete")
+        val logs = AdminServer.recentAuditLogs()
+        assertTrue(logs.any { it.contains("added") && it.contains("logged-repo") }, "Expected add audit log")
+        assertTrue(logs.any { it.contains("deleted") && it.contains("logged-repo") }, "Expected delete audit log")
+    }
 }

@@ -152,6 +152,10 @@ fun main(args: Array<String>) {
                 kotlin.system.exitProcess(1)
             }
             val question = parsed.positional.joinToString(" ")
+            if (question.length > 10_000) {
+                System.err.println("error: question too long (${question.length} chars). Maximum is 10,000 characters.")
+                kotlin.system.exitProcess(1)
+            }
             val config = Config.load(Paths.get("").toAbsolutePath())
             val indexDir = if (parsed.name != null) {
                 Store.namedDir(config.indexBase, parsed.name)

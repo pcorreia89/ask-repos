@@ -13,7 +13,15 @@ object SlackBot {
         Thread(r, "ask-worker").also { it.isDaemon = true }
     }
 
-    private val threadHistory = java.util.concurrent.ConcurrentHashMap<String, MutableList<Pair<String, String>>>()
+    private const val MAX_QUESTION_LENGTH = 5000
+    private const val THREAD_HISTORY_TTL_MS = 24 * 60 * 60 * 1000L
+
+    private data class ThreadEntry(
+        val exchanges: MutableList<Pair<String, String>> = mutableListOf(),
+        @Volatile var lastAccessMs: Long = System.currentTimeMillis(),
+    )
+
+    private val threadHistory = java.util.concurrent.ConcurrentHashMap<String, ThreadEntry>()
 
     fun start(config: Config) {
         val appConfig = AppConfig.builder()
@@ -58,6 +66,12 @@ object SlackBot {
         client: MethodsClient,
         token: String,
     ) {
+        if (question.length > MAX_QUESTION_LENGTH) {
+            postMessage(client, token, channel, threadTs,
+                "Question too long (${question.length} chars). Please keep it under $MAX_QUESTION_LENGTH characters.")
+            return
+        }
+
         val allowedRepos = RepoManager.reposForChannel(config, channel)
             .filter { Store.exists(Store.namedDir(config.indexBase, it)) }
 
@@ -200,9 +214,9 @@ object SlackBot {
 
         val messageTs = postMessage(client, token, channel, threadTs, ":mag: Searching `$repoName`...")
 
-        val history = threadHistory[threadTs]
-        val augmentedQuestion = if (!history.isNullOrEmpty()) {
-            val contextBlock = history.joinToString("\n---\n") { (q, a) ->
+        val threadEntry = threadHistory[threadTs]
+        val augmentedQuestion = if (threadEntry != null && threadEntry.exchanges.isNotEmpty()) {
+            val contextBlock = threadEntry.exchanges.joinToString("\n---\n") { (q, a) ->
                 "Q: $q\nA: ${a.take(500)}"
             }
             "Previous Q&A in this thread:\n$contextBlock\n---\n$question"
@@ -224,15 +238,13 @@ object SlackBot {
             }
         }
 
-        val entries = threadHistory.getOrPut(threadTs) { mutableListOf() }
-        synchronized(entries) {
-            entries.add(question to result.text)
-            if (entries.size > 5) entries.removeAt(0)
+        val entry = threadHistory.getOrPut(threadTs) { ThreadEntry() }
+        synchronized(entry.exchanges) {
+            entry.exchanges.add(question to result.text)
+            if (entry.exchanges.size > 5) entry.exchanges.removeAt(0)
         }
-        if (threadHistory.size > 200) {
-            val keysToRemove = threadHistory.keys.take(threadHistory.size / 2)
-            keysToRemove.forEach { threadHistory.remove(it) }
-        }
+        entry.lastAccessMs = System.currentTimeMillis()
+        evictStaleThreads()
 
         val sources = if (result.sources.isNotEmpty()) {
             "\n\n*Sources:*\n" + result.sources.joinToString("\n") { "  • `$it`" }
@@ -243,6 +255,17 @@ object SlackBot {
             client.chatUpdate { it.token(token).channel(channel).ts(messageTs).text(fullText) }
         } else {
             postMessage(client, token, channel, threadTs, fullText)
+        }
+    }
+
+    private fun evictStaleThreads() {
+        val cutoff = System.currentTimeMillis() - THREAD_HISTORY_TTL_MS
+        threadHistory.entries.removeIf { it.value.lastAccessMs < cutoff }
+        if (threadHistory.size > 200) {
+            threadHistory.entries
+                .sortedBy { it.value.lastAccessMs }
+                .take(threadHistory.size - 200)
+                .forEach { threadHistory.remove(it.key) }
         }
     }
 

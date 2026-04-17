@@ -11,6 +11,8 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.html.*
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -24,6 +26,34 @@ data class SyncJob(
 object AdminServer {
 
     private val syncJobs = ConcurrentHashMap<String, SyncJob>()
+    private val auditLog = CopyOnWriteArrayList<String>()
+    private const val MAX_AUDIT_ENTRIES = 500
+
+    private fun audit(action: String, target: String, user: String? = null) {
+        val entry = "${LocalDateTime.now()} [${user ?: "system"}] $action: $target"
+        auditLog.add(entry)
+        System.err.println("audit: $entry")
+        while (auditLog.size > MAX_AUDIT_ENTRIES) auditLog.removeAt(0)
+    }
+
+    fun recentAuditLogs(): List<String> = auditLog.toList()
+    fun clearAuditLogs() = auditLog.clear()
+
+    private val VALID_SLUG = Regex("^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+    private val VALID_BRANCH = Regex("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$")
+    private val VALID_PROVIDERS = setOf("github", "bitbucket")
+
+    private fun validateEntry(entry: RepoEntry): String? {
+        if (!VALID_SLUG.matches(entry.name)) return "Invalid name: must be alphanumeric, dots, hyphens, underscores"
+        if (entry.provider !in VALID_PROVIDERS) return "Invalid provider: must be github or bitbucket"
+        if (!VALID_SLUG.matches(entry.workspace)) return "Invalid workspace: must be alphanumeric, dots, hyphens, underscores"
+        if (!VALID_SLUG.matches(entry.repo)) return "Invalid repo: must be alphanumeric, dots, hyphens, underscores"
+        if (entry.branch.isNotEmpty() && !VALID_BRANCH.matches(entry.branch)) return "Invalid branch: must not start with special characters"
+        return null
+    }
+
+    private fun secretEquals(a: String, b: String): Boolean =
+        MessageDigest.isEqual(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
 
     fun start(config: Config) {
         val server = embeddedServer(Netty, port = config.adminPort, host = "0.0.0.0") {
@@ -50,37 +80,39 @@ object AdminServer {
                     call.respondText("ok")
                 }
 
-                post("/webhook/{name}") {
-                    val secret = call.request.queryParameters["secret"]
-                        ?: call.request.headers["X-Webhook-Secret"]
-                    if (config.webhookSecret == null || secret != config.webhookSecret) {
-                        call.respondText("unauthorized", status = HttpStatusCode.Unauthorized)
-                        return@post
-                    }
-                    val name = call.parameters["name"]!!
-                    val registry = RepoManager.loadRegistry(config)
-                    if (registry.repos.none { it.name == name }) {
-                        call.respondText("repo '$name' not found", status = HttpStatusCode.NotFound)
-                        return@post
-                    }
-                    val existing = syncJobs[name]
-                    if (existing != null && !existing.done) {
-                        call.respondText("sync already in progress for '$name'", status = HttpStatusCode.OK)
-                        return@post
-                    }
-                    val job = SyncJob(name)
-                    syncJobs[name] = job
-                    Thread {
-                        try {
-                            RepoManager.sync(config, name) { msg -> job.messages.add(msg) }
-                        } catch (e: Exception) {
-                            job.error = e.message ?: "Unknown error"
-                        } finally {
-                            job.done = true
+                if (config.webhookSecret != null) {
+                    post("/webhook/{name}") {
+                        val secret = call.request.queryParameters["secret"]
+                            ?: call.request.headers["X-Webhook-Secret"]
+                        if (secret == null || !secretEquals(secret, config.webhookSecret)) {
+                            call.respondText("unauthorized", status = HttpStatusCode.Unauthorized)
+                            return@post
                         }
-                    }.start()
-                    System.err.println("webhook: triggered sync for '$name'")
-                    call.respondText("sync started for '$name'", status = HttpStatusCode.OK)
+                        val name = call.parameters["name"]!!
+                        val registry = RepoManager.loadRegistry(config)
+                        if (registry.repos.none { it.name == name }) {
+                            call.respondText("repo '$name' not found", status = HttpStatusCode.NotFound)
+                            return@post
+                        }
+                        val existing = syncJobs[name]
+                        if (existing != null && !existing.done) {
+                            call.respondText("sync already in progress for '$name'", status = HttpStatusCode.OK)
+                            return@post
+                        }
+                        val job = SyncJob(name)
+                        syncJobs[name] = job
+                        Thread {
+                            try {
+                                RepoManager.sync(config, name) { msg -> job.messages.add(msg) }
+                            } catch (e: Exception) {
+                                job.error = e.message ?: "Unknown error"
+                            } finally {
+                                job.done = true
+                            }
+                        }.start()
+                        audit("webhook-sync", name)
+                        call.respondText("sync started for '$name'", status = HttpStatusCode.OK)
+                    }
                 }
 
                 authenticate("admin") {
@@ -166,6 +198,14 @@ object AdminServer {
                             }
                             return@post
                         }
+                        val validationError = validateEntry(entry)
+                        if (validationError != null) {
+                            call.respondPage("Error") {
+                                h1 { +validationError }
+                                a(href = "/admin/repos/add") { +"Back" }
+                            }
+                            return@post
+                        }
                         val registry = RepoManager.loadRegistry(config)
                         if (registry.repos.any { it.name == entry.name }) {
                             call.respondPage("Error") {
@@ -176,6 +216,8 @@ object AdminServer {
                         }
                         try {
                             RepoManager.saveRegistry(config, registry.copy(repos = registry.repos + entry))
+                            val user = call.principal<UserIdPrincipal>()?.name
+                            audit("added", entry.name, user)
                             call.respondRedirect("/admin?msg=added")
                         } catch (e: Exception) {
                             call.respondRedirect("/admin?error=${encodeParam(e.message ?: "Failed to add repo")}")
@@ -198,9 +240,19 @@ object AdminServer {
                         try {
                             val params = call.receiveParameters()
                             val updated = entryFromParams(params).copy(name = name)
+                            val validationError = validateEntry(updated)
+                            if (validationError != null) {
+                                call.respondPage("Error") {
+                                    h1 { +validationError }
+                                    a(href = "/admin/repos/$name/edit") { +"Back" }
+                                }
+                                return@post
+                            }
                             val registry = RepoManager.loadRegistry(config)
                             val newRepos = registry.repos.map { if (it.name == name) updated else it }
                             RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
+                            val user = call.principal<UserIdPrincipal>()?.name
+                            audit("updated", name, user)
                             call.respondRedirect("/admin?msg=updated")
                         } catch (e: Exception) {
                             call.respondRedirect("/admin?error=${encodeParam(e.message ?: "Failed to update '$name'")}")
@@ -213,6 +265,8 @@ object AdminServer {
                             val registry = RepoManager.loadRegistry(config)
                             val newRepos = registry.repos.filter { it.name != name }
                             RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
+                            val user = call.principal<UserIdPrincipal>()?.name
+                            audit("deleted", name, user)
                             call.respondRedirect("/admin?msg=deleted")
                         } catch (e: Exception) {
                             call.respondRedirect("/admin?error=${encodeParam(e.message ?: "Failed to delete '$name'")}")
@@ -228,6 +282,8 @@ object AdminServer {
                         }
                         val job = SyncJob(name)
                         syncJobs[name] = job
+                        val user = call.principal<UserIdPrincipal>()?.name
+                        audit("sync-started", name, user)
                         Thread {
                             try {
                                 RepoManager.sync(config, name) { msg -> job.messages.add(msg) }

@@ -352,17 +352,24 @@ Non-obvious choices and their rationale.
   per-chunk JSON. For the expected repo size (hundreds to low thousands
   of chunks) this is 4 * dim * N bytes — tens of MB at most — and loads
   instantly.
+- **Hybrid BM25 + vector retrieval.** Cosine similarity alone misses
+  exact keyword matches; BM25 alone misses semantic similarity. The
+  hybrid scorer normalises both into [0,1] and combines them with a
+  tunable alpha weight, giving better recall than either alone.
 - **Voyage batching at 64 chunks per request, retry 1s / 2s / 4s on 429
   and 5xx.**
-- **Anthropic client uses non-streaming responses.** Simpler, and the
-  Haiku latency is acceptable for a CLI tool.
+- **Anthropic client supports both streaming and non-streaming.** The
+  CLI uses non-streaming (simpler, Haiku latency is acceptable). The
+  Slack bot streams and updates the message in-place every ~1 second for
+  faster perceived latency.
 - **Slack Bolt SDK with Socket Mode.** Socket Mode connects via WebSocket
   so no public URL is needed — ideal for an internal company tool.
   Writing the Socket Mode protocol from scratch would be a significant
   undertaking, justifying the dependency.
-- **Slack bot parses `in <repo-name>` suffix for multi-repo routing.**
-  If only one repo is indexed, it's used automatically. Otherwise the
-  user must specify.
+- **Slack bot auto-detects the target repo.** When multiple repos are
+  available in a channel, the bot embeds the question and compares
+  against each repo's index to pick the best match. Users can still
+  force a repo with the `in <repo-name>` suffix.
 - **Named indexes live under `~/.ask-repos/indexes/<name>/`.** The
   same format as repo-local indexes. The `--name` flag controls which
   mode is used. This keeps the Slack bot decoupled from where repos are
@@ -375,6 +382,24 @@ Non-obvious choices and their rationale.
   a `channels` list of Slack channel IDs. If empty, the repo is
   available everywhere. This lets teams scope repos per channel without
   any per-user config.
+- **Webhook endpoint is only registered when `WEBHOOK_SECRET` is set.**
+  If no secret is configured, the `/webhook/` route does not exist,
+  eliminating the attack surface entirely.
+- **Constant-time webhook secret comparison.** Uses
+  `MessageDigest.isEqual()` to prevent timing-based secret enumeration.
+- **Admin form input validation.** Repo names, workspaces, and repo
+  slugs are validated against `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`; branches
+  against `^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`; provider must be `github`
+  or `bitbucket`. Prevents path traversal and injection via form fields.
+- **Audit logging for admin actions.** All add/edit/delete/sync
+  operations are logged with timestamp and authenticated user to stderr
+  and an in-memory ring buffer (capped at 500 entries).
+- **Question length limits.** The Slack bot rejects questions over 5,000
+  characters; the CLI rejects over 10,000. Prevents abuse of embedding
+  and LLM APIs.
+- **Thread history TTL.** Slack conversation context expires after 24
+  hours and is hard-capped at 200 threads, preventing unbounded memory
+  growth.
 
 ## Known limitations and next steps
 
@@ -382,8 +407,6 @@ Non-obvious choices and their rationale.
 
 - **Gitignore matcher** does not support character classes, backslash
   escaping, or nested `.gitignore` files.
-- **No streaming** from Claude. A long answer blocks until the full
-  response is ready.
 - **Entire vector store is loaded into memory.** Fine at thousands of
   chunks; not at millions.
 - **No concurrent embedding requests.** First-time ingest of large repos
@@ -392,12 +415,15 @@ Non-obvious choices and their rationale.
   repeated questions.
 - **Slack bot loads the index on every question.** For a small number of
   repos this is fine (loads in <1s). At scale, keep indexes in memory.
+- **Admin UI uses HTTP basic auth.** No session management, MFA, or
+  per-user roles. Intended for internal use behind a reverse proxy with
+  TLS.
+- **No rate limiting** on admin UI, webhook, or Slack bot endpoints.
 
 ### Natural next steps
 
-1. **Re-ranking** of retrieved chunks, BM25 + vector hybrid retrieval.
-2. **A proper vector store** — Qdrant, pgvector, or DuckDB — once the
+1. **A proper vector store** — Qdrant, pgvector, or DuckDB — once the
    total size crosses hundreds of MB.
-3. **Streaming** responses to Slack for faster perceived latency.
-4. **Webhook-triggered sync** — GitHub/Bitbucket webhooks trigger
-   re-indexing on push instead of polling.
+2. **Rate limiting** on webhook and admin endpoints to prevent abuse.
+3. **Encryption at rest** for vector indexes (source code chunks are
+   currently stored as plaintext in `chunks.jsonl`).
