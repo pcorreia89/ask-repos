@@ -27,18 +27,25 @@ object AdminServer {
 
     fun start(config: Config) {
         val server = embeddedServer(Netty, port = config.adminPort, host = "0.0.0.0") {
-            install(Authentication) {
-                basic("admin") {
-                    realm = "ask-repos Admin"
-                    validate { credentials ->
-                        if (credentials.name == config.adminUser && credentials.password == config.adminPassword) {
-                            UserIdPrincipal(credentials.name)
-                        } else null
-                    }
+            configure(config)
+        }
+        server.start(wait = false)
+        System.err.println("admin UI running on http://0.0.0.0:${config.adminPort}/admin")
+    }
+
+    internal fun Application.configure(config: Config) {
+        install(Authentication) {
+            basic("admin") {
+                realm = "ask-repos Admin"
+                validate { credentials ->
+                    if (credentials.name == config.adminUser && credentials.password == config.adminPassword) {
+                        UserIdPrincipal(credentials.name)
+                    } else null
                 }
             }
+        }
 
-            routing {
+        routing {
                 get("/admin/health") {
                     call.respondText("ok")
                 }
@@ -281,9 +288,6 @@ es.onerror = function() {
                 }
             }
         }
-        server.start(wait = false)
-        System.err.println("admin UI running on http://0.0.0.0:${config.adminPort}/admin")
-    }
 
     private fun encodeParam(value: String): String = URLEncoder.encode(value, "UTF-8")
 

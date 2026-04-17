@@ -19,6 +19,7 @@ slack-bolt-socket-mode = { module = "com.slack.api:bolt-socket-mode", version.re
 websocket-api = { module = "javax.websocket:javax.websocket-api", version.ref = "websocket-api" }
 tyrus-standalone-client = { module = "org.glassfish.tyrus.bundles:tyrus-standalone-client", version.ref = "tyrus" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
