@@ -9,8 +9,31 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Base64
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 data class RemoteFile(val path: String, val content: ByteArray, val size: Long)
+
+private const val PARALLEL_FETCHES = 8
+
+private fun fetchParallel(
+    paths: List<String>,
+    sizes: List<Long>,
+    fetcher: (String) -> ByteArray?,
+): List<RemoteFile> {
+    val executor = Executors.newFixedThreadPool(PARALLEL_FETCHES)
+    try {
+        val futures = paths.mapIndexed { i, path ->
+            executor.submit<RemoteFile?> {
+                val content = fetcher(path) ?: return@submit null
+                RemoteFile(path, content, sizes[i])
+            }
+        }
+        return futures.mapNotNull { it.get() }
+    } finally {
+        executor.shutdown()
+    }
+}
 
 interface GitProvider {
     fun listAndFetchFiles(workspace: String, repo: String, branch: String, onProgress: (String) -> Unit = {}): List<RemoteFile>
@@ -32,13 +55,11 @@ class BitbucketProvider(private val token: String) : GitProvider {
         val paths = listFiles(workspace, repo, branch)
         System.err.println("  listed ${paths.size} file(s) from Bitbucket")
         val included = paths.filter { Ingest.isIncludedFile(it.path) && it.size <= Defaults.MAX_FILE_BYTES }
-        onProgress("Fetching ${included.size} files from Bitbucket...")
-        val out = ArrayList<RemoteFile>()
-        for ((i, p) in included.withIndex()) {
-            onProgress("Fetching file ${i + 1}/${included.size}: ${p.path}")
-            val content = fetchFile(workspace, repo, branch, p.path) ?: continue
-            out.add(RemoteFile(p.path, content, p.size))
+        onProgress("Fetching ${included.size} files from Bitbucket (${PARALLEL_FETCHES} parallel)...")
+        val out = fetchParallel(included.map { it.path }, included.map { it.size }) { path ->
+            fetchFile(workspace, repo, branch, path)
         }
+        onProgress("Fetched ${out.size} files from Bitbucket")
         System.err.println("  fetched ${out.size} included file(s)")
         return out
     }
@@ -118,13 +139,11 @@ class GitHubProvider(private val token: String) : GitProvider {
         val tree = listTree(workspace, repo, branch)
         System.err.println("  listed ${tree.size} file(s) from GitHub")
         val included = tree.filter { it.type == "blob" && Ingest.isIncludedFile(it.path) && (it.size ?: 0) <= Defaults.MAX_FILE_BYTES }
-        onProgress("Fetching ${included.size} files from GitHub...")
-        val out = ArrayList<RemoteFile>()
-        for ((i, entry) in included.withIndex()) {
-            onProgress("Fetching file ${i + 1}/${included.size}: ${entry.path}")
-            val content = fetchFile(workspace, repo, branch, entry.path) ?: continue
-            out.add(RemoteFile(entry.path, content, entry.size ?: content.size.toLong()))
+        onProgress("Fetching ${included.size} files from GitHub (${PARALLEL_FETCHES} parallel)...")
+        val out = fetchParallel(included.map { it.path }, included.map { it.size ?: 0L }) { path ->
+            fetchFile(workspace, repo, branch, path)
         }
+        onProgress("Fetched ${out.size} files from GitHub")
         System.err.println("  fetched ${out.size} included file(s)")
         return out
     }
