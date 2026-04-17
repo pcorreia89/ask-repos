@@ -200,6 +200,7 @@ GITHUB_TOKEN=...
 BITBUCKET_TOKEN=...
 ADMIN_USER=admin
 ADMIN_PASSWORD=<change-me>
+SYNC_INTERVAL_MINUTES=30
 ```
 
 ### Run with systemd
@@ -248,6 +249,21 @@ rm -rf ask-repos-0.1.0
 unzip ask-repos-0.1.0.zip
 systemctl --user restart ask-repos.service
 ```
+
+### HTTPS with a reverse proxy
+
+The admin UI uses HTTP basic auth, so credentials are sent in plain text.
+For production, put it behind a reverse proxy with TLS. Example with Caddy:
+
+```
+# /etc/caddy/Caddyfile
+ask-repos.internal.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Caddy auto-provisions TLS certificates. For nginx, add a `proxy_pass`
+block and configure your own certificate (e.g. via Let's Encrypt / certbot).
 
 ### Exit codes
 
