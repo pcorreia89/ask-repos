@@ -13,7 +13,7 @@ import java.util.HexFormat
 
 object Ingest {
 
-    fun runFromRemoteFiles(config: Config, files: List<RemoteFile>, indexDir: Path, repoLabel: String) {
+    fun runFromRemoteFiles(config: Config, files: List<RemoteFile>, indexDir: Path, repoLabel: String, onProgress: (String) -> Unit = {}) {
         val priorManifest = Store.readManifest(indexDir)
         val priorFiles = Store.readFilesIndex(indexDir).files
         val priorChunks = Store.readChunks(indexDir).associateBy { it.id }
@@ -26,6 +26,7 @@ object Ingest {
             }
         }
 
+        onProgress("Processing ${files.size} files...")
         System.err.println("included ${files.size} file(s) from $repoLabel")
         var changedCount = 0
         var reusedCount = 0
@@ -68,8 +69,9 @@ object Ingest {
             newFilesIndex[rel] = FileEntry(hash, ids)
         }
 
+        onProgress("Changed $changedCount files, reused $reusedCount, ${toEmbed.size} chunks to embed")
         System.err.println("changed $changedCount, skipped-unchanged $reusedCount, chunks-to-embed ${toEmbed.size}")
-        embedAndPersist(config, indexDir, repoLabel, priorManifest, newFilesIndex, newChunks, newVectors, toEmbed)
+        embedAndPersist(config, indexDir, repoLabel, priorManifest, newFilesIndex, newChunks, newVectors, toEmbed, onProgress)
     }
 
     fun run(config: Config, repoPath: Path, indexDir: Path? = null) {
@@ -168,11 +170,16 @@ object Ingest {
         newChunks: List<StoredChunk>,
         newVectors: MutableList<FloatArray>,
         toEmbed: List<StoredChunk>,
+        onProgress: (String) -> Unit = {},
     ) {
         val dim: Int
         if (toEmbed.isNotEmpty()) {
+            val totalBatches = (toEmbed.size + Defaults.EMBED_BATCH_SIZE - 1) / Defaults.EMBED_BATCH_SIZE
+            onProgress("Embedding ${toEmbed.size} chunks ($totalBatches batches)...")
             val client = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
-            val embedded = client.embed(toEmbed.map { it.text }, EmbeddingsClient.InputType.DOCUMENT)
+            val embedded = client.embed(toEmbed.map { it.text }, EmbeddingsClient.InputType.DOCUMENT) { batch, total ->
+                onProgress("Embedding batch $batch/$total...")
+            }
             require(embedded.size == toEmbed.size) { "embedding count mismatch" }
             dim = embedded.first().size
             val idToVec = HashMap<String, FloatArray>(embedded.size)
@@ -201,11 +208,13 @@ object Ingest {
             createdAt = priorManifest?.createdAt ?: now,
             updatedAt = now,
         )
+        onProgress("Writing index...")
         Store.writeManifest(outDir, manifest)
         Store.writeFilesIndex(outDir, FilesIndex(newFilesIndex))
         Store.writeChunks(outDir, newChunks)
         Store.writeVectors(outDir, dim, newVectors)
 
+        onProgress("Done! ${toEmbed.size} chunks embedded, ${newChunks.size} total across ${newFilesIndex.size} files")
         println("embedded ${toEmbed.size} chunk(s); total ${newChunks.size} chunk(s) across ${newFilesIndex.size} file(s)")
         println("index written to $outDir")
     }

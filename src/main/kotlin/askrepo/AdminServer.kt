@@ -10,8 +10,19 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.html.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+
+data class SyncJob(
+    val name: String,
+    val messages: CopyOnWriteArrayList<String> = CopyOnWriteArrayList(),
+    @Volatile var done: Boolean = false,
+    @Volatile var error: String? = null,
+)
 
 object AdminServer {
+
+    private val syncJobs = ConcurrentHashMap<String, SyncJob>()
 
     fun start(config: Config) {
         val server = embeddedServer(Netty, port = config.adminPort, host = "0.0.0.0") {
@@ -169,11 +180,96 @@ object AdminServer {
 
                     post("/admin/repos/{name}/sync") {
                         val name = call.parameters["name"]!!
-                        try {
-                            RepoManager.sync(config, name)
-                            call.respondRedirect("/admin?msg=synced")
-                        } catch (e: Exception) {
-                            call.respondRedirect("/admin?error=${e.message ?: "Failed to sync '$name'"}")
+                        val job = SyncJob(name)
+                        syncJobs[name] = job
+                        Thread {
+                            try {
+                                RepoManager.sync(config, name) { msg -> job.messages.add(msg) }
+                            } catch (e: Exception) {
+                                job.error = e.message ?: "Unknown error"
+                                job.messages.add("Error: ${job.error}")
+                            } finally {
+                                job.done = true
+                            }
+                        }.start()
+                        call.respondRedirect("/admin/repos/$name/sync-progress")
+                    }
+
+                    get("/admin/repos/{name}/sync-progress") {
+                        val name = call.parameters["name"]!!
+                        call.respondPage("Syncing $name") {
+                            h1 { +"Syncing $name" }
+                            div {
+                                id = "log"
+                                style = "background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;font-family:monospace;font-size:13px;min-height:200px;max-height:400px;overflow-y:auto;white-space:pre-wrap"
+                            }
+                            p {
+                                id = "status"
+                                style = "font-weight:600;margin-top:12px"
+                                +"Connecting..."
+                            }
+                            script {
+                                unsafe {
+                                    raw("""
+const log = document.getElementById('log');
+const status = document.getElementById('status');
+const es = new EventSource('/admin/repos/$name/sync-events');
+es.onmessage = function(e) {
+  log.textContent += e.data + '\n';
+  log.scrollTop = log.scrollHeight;
+};
+es.addEventListener('done', function(e) {
+  status.textContent = e.data;
+  status.style.color = '#16a34a';
+  es.close();
+});
+es.addEventListener('error-msg', function(e) {
+  status.textContent = e.data;
+  status.style.color = '#dc2626';
+  es.close();
+});
+es.onerror = function() {
+  if (es.readyState === EventSource.CLOSED) return;
+  status.textContent = 'Connection lost';
+  status.style.color = '#dc2626';
+  es.close();
+};
+""".trimIndent())
+                                }
+                            }
+                            br()
+                            a(href = "/admin") { +"\u2190 Back to Dashboard" }
+                        }
+                    }
+
+                    get("/admin/repos/{name}/sync-events") {
+                        val name = call.parameters["name"]!!
+                        val job = syncJobs[name]
+                        call.response.header(HttpHeaders.ContentType, "text/event-stream")
+                        call.response.header(HttpHeaders.CacheControl, "no-cache")
+                        call.response.header(HttpHeaders.Connection, "keep-alive")
+                        call.respondTextWriter {
+                            if (job == null) {
+                                write("event: error-msg\ndata: No sync job found for '$name'\n\n")
+                                flush()
+                                return@respondTextWriter
+                            }
+                            var sent = 0
+                            while (!job.done || sent < job.messages.size) {
+                                while (sent < job.messages.size) {
+                                    write("data: ${job.messages[sent]}\n\n")
+                                    flush()
+                                    sent++
+                                }
+                                if (!job.done) Thread.sleep(200)
+                            }
+                            if (job.error != null) {
+                                write("event: error-msg\ndata: Sync failed: ${job.error}\n\n")
+                            } else {
+                                write("event: done\ndata: Sync completed successfully\n\n")
+                            }
+                            flush()
+                            syncJobs.remove(name)
                         }
                     }
                 }

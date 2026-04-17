@@ -13,7 +13,7 @@ import java.util.Base64
 data class RemoteFile(val path: String, val content: ByteArray, val size: Long)
 
 interface GitProvider {
-    fun listAndFetchFiles(workspace: String, repo: String, branch: String): List<RemoteFile>
+    fun listAndFetchFiles(workspace: String, repo: String, branch: String, onProgress: (String) -> Unit = {}): List<RemoteFile>
 }
 
 class BitbucketProvider(private val token: String) : GitProvider {
@@ -27,13 +27,15 @@ class BitbucketProvider(private val token: String) : GitProvider {
         "Bearer $token"
     }
 
-    override fun listAndFetchFiles(workspace: String, repo: String, branch: String): List<RemoteFile> {
+    override fun listAndFetchFiles(workspace: String, repo: String, branch: String, onProgress: (String) -> Unit): List<RemoteFile> {
+        onProgress("Listing files from Bitbucket...")
         val paths = listFiles(workspace, repo, branch)
         System.err.println("  listed ${paths.size} file(s) from Bitbucket")
+        val included = paths.filter { Ingest.isIncludedFile(it.path) && it.size <= Defaults.MAX_FILE_BYTES }
+        onProgress("Fetching ${included.size} files from Bitbucket...")
         val out = ArrayList<RemoteFile>()
-        for (p in paths) {
-            if (!Ingest.isIncludedFile(p.path)) continue
-            if (p.size > Defaults.MAX_FILE_BYTES) continue
+        for ((i, p) in included.withIndex()) {
+            onProgress("Fetching file ${i + 1}/${included.size}: ${p.path}")
             val content = fetchFile(workspace, repo, branch, p.path) ?: continue
             out.add(RemoteFile(p.path, content, p.size))
         }
@@ -111,14 +113,15 @@ class GitHubProvider(private val token: String) : GitProvider {
     private val json = Json { ignoreUnknownKeys = true }
     private val baseUrl = "https://api.github.com"
 
-    override fun listAndFetchFiles(workspace: String, repo: String, branch: String): List<RemoteFile> {
+    override fun listAndFetchFiles(workspace: String, repo: String, branch: String, onProgress: (String) -> Unit): List<RemoteFile> {
+        onProgress("Listing files from GitHub...")
         val tree = listTree(workspace, repo, branch)
         System.err.println("  listed ${tree.size} file(s) from GitHub")
+        val included = tree.filter { it.type == "blob" && Ingest.isIncludedFile(it.path) && (it.size ?: 0) <= Defaults.MAX_FILE_BYTES }
+        onProgress("Fetching ${included.size} files from GitHub...")
         val out = ArrayList<RemoteFile>()
-        for (entry in tree) {
-            if (entry.type != "blob") continue
-            if (!Ingest.isIncludedFile(entry.path)) continue
-            if ((entry.size ?: 0) > Defaults.MAX_FILE_BYTES) continue
+        for ((i, entry) in included.withIndex()) {
+            onProgress("Fetching file ${i + 1}/${included.size}: ${entry.path}")
             val content = fetchFile(workspace, repo, branch, entry.path) ?: continue
             out.add(RemoteFile(entry.path, content, entry.size ?: content.size.toLong()))
         }

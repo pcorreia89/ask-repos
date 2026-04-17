@@ -21,10 +21,12 @@ class EmbeddingsClient(
 
     enum class InputType { DOCUMENT, QUERY }
 
-    fun embed(texts: List<String>, type: InputType): List<FloatArray> {
+    fun embed(texts: List<String>, type: InputType, onBatchProgress: (batch: Int, total: Int) -> Unit = { _, _ -> }): List<FloatArray> {
         if (texts.isEmpty()) return emptyList()
+        val batches = texts.chunked(Defaults.EMBED_BATCH_SIZE)
         val out = ArrayList<FloatArray>(texts.size)
-        texts.chunked(Defaults.EMBED_BATCH_SIZE).forEach { batch ->
+        for ((i, batch) in batches.withIndex()) {
+            onBatchProgress(i + 1, batches.size)
             out.addAll(embedBatch(batch, type))
         }
         return out

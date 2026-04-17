@@ -55,7 +55,7 @@ object RepoManager {
         }
     }
 
-    fun sync(config: Config, name: String? = null) {
+    fun sync(config: Config, name: String? = null, onProgress: (String) -> Unit = {}) {
         val registry = loadRegistry(config)
         if (registry.repos.isEmpty()) {
             System.err.println("no repos in repos.json. Add entries and re-run.")
@@ -75,13 +75,14 @@ object RepoManager {
         }
 
         for (entry in targets) {
+            onProgress("Syncing ${entry.name} (${entry.provider}:${entry.workspace}/${entry.repo}@${entry.branch})...")
             System.err.println("syncing ${entry.name} (${entry.provider}:${entry.workspace}/${entry.repo}@${entry.branch})...")
             try {
                 val provider = providerFor(entry, config)
-                val files = provider.listAndFetchFiles(entry.workspace, entry.repo, entry.branch)
+                val files = provider.listAndFetchFiles(entry.workspace, entry.repo, entry.branch, onProgress)
                 val indexDir = Store.namedDir(config.indexBase, entry.name)
                 val label = "${entry.provider}:${entry.workspace}/${entry.repo}"
-                Ingest.runFromRemoteFiles(config, files, indexDir, label)
+                Ingest.runFromRemoteFiles(config, files, indexDir, label, onProgress)
             } catch (t: Throwable) {
                 System.err.println("error syncing ${entry.name}: ${t.message}")
             }
