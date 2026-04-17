@@ -10,6 +10,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.html.*
+import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -137,7 +138,7 @@ object AdminServer {
                             RepoManager.saveRegistry(config, registry.copy(repos = registry.repos + entry))
                             call.respondRedirect("/admin?msg=added")
                         } catch (e: Exception) {
-                            call.respondRedirect("/admin?error=${e.message ?: "Failed to add repo"}")
+                            call.respondRedirect("/admin?error=${encodeParam(e.message ?: "Failed to add repo")}")
                         }
                     }
 
@@ -162,7 +163,7 @@ object AdminServer {
                             RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
                             call.respondRedirect("/admin?msg=updated")
                         } catch (e: Exception) {
-                            call.respondRedirect("/admin?error=${e.message ?: "Failed to update '$name'"}")
+                            call.respondRedirect("/admin?error=${encodeParam(e.message ?: "Failed to update '$name'")}")
                         }
                     }
 
@@ -174,12 +175,17 @@ object AdminServer {
                             RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
                             call.respondRedirect("/admin?msg=deleted")
                         } catch (e: Exception) {
-                            call.respondRedirect("/admin?error=${e.message ?: "Failed to delete '$name'"}")
+                            call.respondRedirect("/admin?error=${encodeParam(e.message ?: "Failed to delete '$name'")}")
                         }
                     }
 
                     post("/admin/repos/{name}/sync") {
                         val name = call.parameters["name"]!!
+                        val existing = syncJobs[name]
+                        if (existing != null && !existing.done) {
+                            call.respondRedirect("/admin/repos/$name/sync-progress")
+                            return@post
+                        }
                         val job = SyncJob(name)
                         syncJobs[name] = job
                         Thread {
@@ -278,6 +284,8 @@ es.onerror = function() {
         server.start(wait = false)
         System.err.println("admin UI running on http://0.0.0.0:${config.adminPort}/admin")
     }
+
+    private fun encodeParam(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     private fun entryFromParams(params: Parameters): RepoEntry {
         val channels = (params["channels"] ?: "")
