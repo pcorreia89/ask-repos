@@ -53,6 +53,35 @@ Rules:
         return AnswerResult(text.trim(), sources)
     }
 
+    fun answerStreaming(config: Config, indexDir: Path, question: String, onChunk: (text: String, sources: List<String>) -> Unit): AnswerResult {
+        if (!Store.exists(indexDir)) {
+            return AnswerResult("No index found at $indexDir. Run `ingest` first.", emptyList())
+        }
+        val manifest = Store.readManifest(indexDir)
+            ?: return AnswerResult("Corrupt index — missing manifest.", emptyList())
+        val chunks = Store.readChunks(indexDir)
+        val (dim, vectors) = Store.readVectors(indexDir)
+        require(dim == manifest.dim) { "manifest dim ${manifest.dim} != vectors.bin dim $dim" }
+        require(vectors.size == chunks.size) { "vectors/chunks length mismatch" }
+
+        val embedClient = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
+        val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
+        require(queryVec.size == dim) { "query vector dim ${queryVec.size} != index dim $dim" }
+
+        val hits = Retrieve.topK(queryVec, chunks, vectors, config.topK)
+        if (hits.isEmpty()) {
+            return AnswerResult("I couldn't find this in the indexed repository.", emptyList())
+        }
+
+        val sources = hits.map { it.chunk.filePath }.distinct()
+        val userContent = buildUserContent(question, hits)
+        val anthropic = AnthropicClient(config.anthropicApiKey, config.anthropicModel)
+        val text = anthropic.messageStreaming(SYSTEM_PROMPT, userContent, config.maxTokens) { partial ->
+            onChunk(partial, sources)
+        }
+        return AnswerResult(text.trim(), sources)
+    }
+
     fun run(config: Config, indexDir: Path, question: String) {
         if (!Store.exists(indexDir)) {
             System.err.println(

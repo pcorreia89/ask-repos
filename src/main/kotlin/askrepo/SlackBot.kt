@@ -198,7 +198,7 @@ object SlackBot {
             return
         }
 
-        val thinkingTs = postMessage(client, token, channel, threadTs, ":mag: Searching `$repoName`...")
+        val messageTs = postMessage(client, token, channel, threadTs, ":mag: Searching `$repoName`...")
 
         val history = threadHistory[threadTs]
         val augmentedQuestion = if (!history.isNullOrEmpty()) {
@@ -210,7 +210,19 @@ object SlackBot {
             question
         }
 
-        val result = Answer.answer(config, indexDir, augmentedQuestion)
+        var lastUpdateMs = 0L
+        val result = Answer.answerStreaming(config, indexDir, augmentedQuestion) { partial, sources ->
+            val now = System.currentTimeMillis()
+            if (messageTs != null && now - lastUpdateMs >= 1000) {
+                lastUpdateMs = now
+                val sourcesText = if (sources.isNotEmpty()) {
+                    "\n\n*Sources:*\n" + sources.joinToString("\n") { "  • `$it`" }
+                } else ""
+                try {
+                    client.chatUpdate { it.token(token).channel(channel).ts(messageTs).text(partial + sourcesText) }
+                } catch (_: Exception) { }
+            }
+        }
 
         val entries = threadHistory.getOrPut(threadTs) { mutableListOf() }
         synchronized(entries) {
@@ -227,8 +239,8 @@ object SlackBot {
         } else ""
         val fullText = result.text + sources
 
-        if (thinkingTs != null) {
-            client.chatUpdate { it.token(token).channel(channel).ts(thinkingTs).text(fullText) }
+        if (messageTs != null) {
+            client.chatUpdate { it.token(token).channel(channel).ts(messageTs).text(fullText) }
         } else {
             postMessage(client, token, channel, threadTs, fullText)
         }
