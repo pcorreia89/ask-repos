@@ -212,14 +212,16 @@ fun main(args: Array<String>) {
         }
         "serve" -> {
             val config = Config.load(Paths.get("").toAbsolutePath())
-            if (config.slackBotToken.isNullOrEmpty() || config.slackAppToken.isNullOrEmpty()) {
+            AdminServer.start(config)
+            if (!config.slackBotToken.isNullOrEmpty() && !config.slackAppToken.isNullOrEmpty()) {
+                SlackBot.start(config)
+            } else {
                 System.err.println(
-                    "error: serve requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN. " +
-                        "See .env.example."
+                    "SLACK_BOT_TOKEN / SLACK_APP_TOKEN not set — running admin UI only. " +
+                        "Set them in .env to enable the Slack bot."
                 )
-                kotlin.system.exitProcess(2)
+                Thread.currentThread().join()
             }
-            SlackBot.start(config)
         }
         else -> {
             System.err.println("unknown command: ${args[0]}")
