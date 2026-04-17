@@ -41,7 +41,7 @@ Rules:
         val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
         require(queryVec.size == dim) { "query vector dim ${queryVec.size} != index dim $dim" }
 
-        val hits = Retrieve.topK(queryVec, chunks, vectors, config.topK)
+        val hits = Retrieve.topKHybrid(question, queryVec, chunks, vectors, config.topK)
         if (hits.isEmpty()) {
             return AnswerResult("I couldn't find this in the indexed repository.", emptyList())
         }
@@ -68,7 +68,7 @@ Rules:
         val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
         require(queryVec.size == dim) { "query vector dim ${queryVec.size} != index dim $dim" }
 
-        val hits = Retrieve.topK(queryVec, chunks, vectors, config.topK)
+        val hits = Retrieve.topKHybrid(question, queryVec, chunks, vectors, config.topK)
         if (hits.isEmpty()) {
             return AnswerResult("I couldn't find this in the indexed repository.", emptyList())
         }

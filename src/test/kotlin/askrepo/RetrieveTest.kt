@@ -84,4 +84,52 @@ class RetrieveTest {
         } catch (e: IllegalArgumentException) { e }
         assertTrue(ex != null)
     }
+
+    @Test
+    fun tokenizeSplitsAndLowercases() {
+        val tokens = Retrieve.tokenize("Hello World! This is a TEST_123")
+        assertEquals(listOf("hello", "world", "this", "is", "test", "123"), tokens)
+    }
+
+    @Test
+    fun tokenizeDropsSingleCharTokens() {
+        val tokens = Retrieve.tokenize("a b cc dd")
+        assertEquals(listOf("cc", "dd"), tokens)
+    }
+
+    @Test
+    fun bm25ScoresHigherForMatchingTerms() {
+        val chunks = listOf(
+            StoredChunk("a", "auth.kt", 1, 10, "kt", "authentication login password user session"),
+            StoredChunk("b", "db.kt", 1, 10, "kt", "database connection pool query migration"),
+            StoredChunk("c", "auth2.kt", 1, 10, "kt", "login flow validates user password reset"),
+        )
+        val scores = Retrieve.bm25Scores("how does login authentication work", chunks)
+        assertTrue(scores[0] > scores[1], "auth chunk should score higher than db chunk")
+        assertTrue(scores[2] > scores[1], "auth2 chunk should score higher than db chunk")
+    }
+
+    @Test
+    fun bm25ScoresZeroForNoMatch() {
+        val chunks = listOf(
+            StoredChunk("a", "f.kt", 1, 10, "kt", "completely unrelated content about weather"),
+        )
+        val scores = Retrieve.bm25Scores("authentication login", chunks)
+        assertEquals(0f, scores[0])
+    }
+
+    @Test
+    fun topKHybridCombinesBothSignals() {
+        val chunks = listOf(
+            StoredChunk("vec-match", "a.kt", 1, 10, "kt", "unrelated text with no keyword overlap"),
+            StoredChunk("keyword-match", "b.kt", 1, 10, "kt", "authentication login password security"),
+        )
+        val vectors = listOf(
+            floatArrayOf(1f, 0f),
+            floatArrayOf(0.5f, 0.5f),
+        )
+        val query = floatArrayOf(1f, 0f)
+        val results = Retrieve.topKHybrid("authentication login", query, chunks, vectors, 2)
+        assertEquals(2, results.size)
+    }
 }
