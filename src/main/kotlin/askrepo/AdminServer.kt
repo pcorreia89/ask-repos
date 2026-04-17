@@ -69,18 +69,24 @@ object AdminServer {
                                                 td { +(if (isIndexed) "yes" else "no") }
                                                 td { +(manifest?.updatedAt ?: "-") }
                                                 td {
-                                                    a(href = "/admin/repos/${repo.name}/edit") { +"Edit" }
-                                                    +" | "
+                                                    style = "white-space:nowrap"
+                                                    a(href = "/admin/repos/${repo.name}/edit", classes = "icon-btn") {
+                                                        title = "Edit"
+                                                        +"\u270E"
+                                                    }
                                                     form(action = "/admin/repos/${repo.name}/sync", method = FormMethod.post) {
                                                         style = "display:inline"
-                                                        submitInput { value = "Sync" }
+                                                        button(type = ButtonType.submit, classes = "icon-btn") {
+                                                            title = "Sync"
+                                                            +"\u21BB"
+                                                        }
                                                     }
-                                                    +" | "
                                                     form(action = "/admin/repos/${repo.name}/delete", method = FormMethod.post) {
                                                         style = "display:inline"
-                                                        submitInput {
-                                                            value = "Delete"
+                                                        button(type = ButtonType.submit, classes = "icon-btn danger") {
+                                                            title = "Delete"
                                                             attributes["onclick"] = "return confirm('Delete ${repo.name}?')"
+                                                            +"\u2716"
                                                         }
                                                     }
                                                 }
@@ -254,6 +260,10 @@ form input[type=text], form select { display: block; width: 100%; padding: 8px; 
 form input[type=submit] { background: #2563eb; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
 form input[type=submit]:hover { background: #1d4ed8; }
 a { color: #2563eb; }
+.icon-btn { background: none; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-size: 16px; padding: 4px 8px; margin-right: 4px; color: #2563eb; text-decoration: none; display: inline-block; line-height: 1; }
+.icon-btn:hover { background: #eff6ff; border-color: #2563eb; }
+.icon-btn.danger { color: #dc2626; }
+.icon-btn.danger:hover { background: #fef2f2; border-color: #dc2626; }
 .flash { background: #dcfce7; border: 1px solid #86efac; padding: 8px 16px; border-radius: 4px; margin-bottom: 16px; }
 """
 }
