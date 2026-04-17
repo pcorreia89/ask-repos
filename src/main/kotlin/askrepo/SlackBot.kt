@@ -69,7 +69,8 @@ object SlackBot {
             }
             postMessage(client, token, channel, threadTs,
                 "*ask-repos* — ask questions about your codebase.\n\n" +
-                    "Usage: `@ask-repos <question>` or `@ask-repos <question> in <repo-name>`\n\n" +
+                    "Usage: `@ask-repos <question>` — the best repo is auto-detected.\n" +
+                    "To target a specific repo: `@ask-repos <question> in <repo-name>`\n\n" +
                     "Available repos:\n$repoList")
             return
         }
@@ -125,9 +126,14 @@ object SlackBot {
                 handleQuestion(config, allowedRepos.first(), actualQuestion, channel, threadTs, client, token)
                 return
             }
+            val best = detectRepo(config, actualQuestion, allowedRepos)
+            if (best != null) {
+                handleQuestion(config, best, actualQuestion, channel, threadTs, client, token)
+                return
+            }
             postMessage(client, token, channel, threadTs,
-                "Multiple repos available. Please specify: " +
-                    "`@ask-repos <question> in <repo-name>`\n\n" +
+                "Multiple repos available and I couldn't determine which one fits best. " +
+                    "Please specify: `@ask-repos <question> in <repo-name>`\n\n" +
                     "Available: ${allowedRepos.joinToString(", ") { "`$it`" }}")
             return
         }
@@ -154,6 +160,26 @@ object SlackBot {
             }
         }
         return ParsedQuestion(text, null)
+    }
+
+    private fun detectRepo(config: Config, question: String, repos: List<String>): String? {
+        val embedClient = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
+        val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
+        var bestRepo: String? = null
+        var bestScore = 0f
+        for (name in repos) {
+            val indexDir = Store.namedDir(config.indexBase, name)
+            if (!Store.exists(indexDir)) continue
+            val chunks = Store.readChunks(indexDir)
+            val (_, vectors) = Store.readVectors(indexDir)
+            if (chunks.isEmpty() || vectors.isEmpty()) continue
+            val top = Retrieve.topK(queryVec, chunks, vectors, 1)
+            if (top.isNotEmpty() && top[0].score > bestScore) {
+                bestScore = top[0].score
+                bestRepo = name
+            }
+        }
+        return bestRepo
     }
 
     private fun handleQuestion(
