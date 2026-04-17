@@ -122,8 +122,12 @@ object AdminServer {
                             }
                             return@post
                         }
-                        RepoManager.saveRegistry(config, registry.copy(repos = registry.repos + entry))
-                        call.respondRedirect("/admin?msg=added")
+                        try {
+                            RepoManager.saveRegistry(config, registry.copy(repos = registry.repos + entry))
+                            call.respondRedirect("/admin?msg=added")
+                        } catch (e: Exception) {
+                            call.respondRedirect("/admin?error=${e.message ?: "Failed to add repo"}")
+                        }
                     }
 
                     get("/admin/repos/{name}/edit") {
@@ -139,20 +143,28 @@ object AdminServer {
 
                     post("/admin/repos/{name}/edit") {
                         val name = call.parameters["name"]!!
-                        val params = call.receiveParameters()
-                        val updated = entryFromParams(params).copy(name = name)
-                        val registry = RepoManager.loadRegistry(config)
-                        val newRepos = registry.repos.map { if (it.name == name) updated else it }
-                        RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
-                        call.respondRedirect("/admin?msg=updated")
+                        try {
+                            val params = call.receiveParameters()
+                            val updated = entryFromParams(params).copy(name = name)
+                            val registry = RepoManager.loadRegistry(config)
+                            val newRepos = registry.repos.map { if (it.name == name) updated else it }
+                            RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
+                            call.respondRedirect("/admin?msg=updated")
+                        } catch (e: Exception) {
+                            call.respondRedirect("/admin?error=${e.message ?: "Failed to update '$name'"}")
+                        }
                     }
 
                     post("/admin/repos/{name}/delete") {
                         val name = call.parameters["name"]!!
-                        val registry = RepoManager.loadRegistry(config)
-                        val newRepos = registry.repos.filter { it.name != name }
-                        RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
-                        call.respondRedirect("/admin?msg=deleted")
+                        try {
+                            val registry = RepoManager.loadRegistry(config)
+                            val newRepos = registry.repos.filter { it.name != name }
+                            RepoManager.saveRegistry(config, registry.copy(repos = newRepos))
+                            call.respondRedirect("/admin?msg=deleted")
+                        } catch (e: Exception) {
+                            call.respondRedirect("/admin?error=${e.message ?: "Failed to delete '$name'"}")
+                        }
                     }
 
                     post("/admin/repos/{name}/sync") {
@@ -161,11 +173,7 @@ object AdminServer {
                             RepoManager.sync(config, name)
                             call.respondRedirect("/admin?msg=synced")
                         } catch (e: Exception) {
-                            call.respondPage("Sync Error") {
-                                h1 { +"Sync failed for '$name'" }
-                                p { +(e.message ?: "Unknown error") }
-                                a(href = "/admin") { +"Back" }
-                            }
+                            call.respondRedirect("/admin?error=${e.message ?: "Failed to sync '$name'"}")
                         }
                     }
                 }
@@ -206,8 +214,12 @@ object AdminServer {
                     a(href = "/admin/repos/add") { +"Add Repo" }
                 }
                 val msg = request.queryParameters["msg"]
+                val error = request.queryParameters["error"]
                 if (msg != null) {
-                    div("flash") { +msg }
+                    div("flash success") { +msg }
+                }
+                if (error != null) {
+                    div("flash error") { +error }
                 }
                 block()
             }
@@ -264,6 +276,8 @@ a { color: #2563eb; }
 .icon-btn:hover { background: #eff6ff; border-color: #2563eb; }
 .icon-btn.danger { color: #dc2626; }
 .icon-btn.danger:hover { background: #fef2f2; border-color: #dc2626; }
-.flash { background: #dcfce7; border: 1px solid #86efac; padding: 8px 16px; border-radius: 4px; margin-bottom: 16px; }
+.flash { padding: 8px 16px; border-radius: 4px; margin-bottom: 16px; }
+.flash.success { background: #dcfce7; border: 1px solid #86efac; }
+.flash.error { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; }
 """
 }
