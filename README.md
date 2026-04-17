@@ -163,32 +163,70 @@ In Slack, mention the bot with a question:
    `SLACK_BOT_TOKEN`.
 6. Add both tokens to `.env` and run `./ask-repos serve`.
 
-## Deployment (Docker on EC2)
+## Deployment
 
 ### What you need
 
-- An EC2 instance (or any Linux host) with **Docker** and **Docker Compose** installed.
+- An EC2 instance (or any Linux host) with **Java 21** (JRE) installed.
 - API keys: `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`.
 - Git provider token(s): `GITHUB_TOKEN` and/or `BITBUCKET_TOKEN`.
 - Slack app tokens: `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` (see [Slack app setup](#slack-app-setup) below).
 
-### Steps
+### Build and deploy
 
 ```sh
-# 1. Clone the repo on the server
-git clone <repo-url>
-cd ask-repos
+# 1. Build the distribution zip locally
+./gradlew assembleDist
 
-# 2. Create .env from the example and fill in your keys
-cp .env.example .env
-# edit .env — at minimum set the API keys and Slack tokens
+# 2. Copy to the server
+scp build/distributions/ask-repos-0.1.0.zip app@<server>:~/
 
-# 3. Start the service
-docker compose up -d
+# 3. SSH in, extract, and set up
+ssh app@<server>
+rm -rf ask-repos-0.1.0
+unzip ask-repos-0.1.0.zip
+```
+
+### Configure environment
+
+Create a `.env` file on the server (e.g. `~/ask-repos.env`):
+
+```sh
+ANTHROPIC_API_KEY=...
+VOYAGE_API_KEY=...
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+GITHUB_TOKEN=...
+BITBUCKET_TOKEN=...
+ADMIN_USER=admin
+ADMIN_PASSWORD=<change-me>
+```
+
+### Run with systemd
+
+Create `~/.config/systemd/user/ask-repos.service`:
+
+```ini
+[Unit]
+Description=ask-repos
+
+[Service]
+WorkingDirectory=%h
+EnvironmentFile=%h/ask-repos.env
+ExecStart=%h/ask-repos-0.1.0/bin/ask-repos serve
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now ask-repos.service
 ```
 
 The admin UI is now available at `http://<server-ip>:3000/admin`
-(default login: `admin` / `admin` — change via `ADMIN_USER` / `ADMIN_PASSWORD` in `.env`).
+(login with `ADMIN_USER` / `ADMIN_PASSWORD` from the env file).
 
 ### Configure repos and channels
 
@@ -198,8 +236,18 @@ The admin UI is now available at `http://<server-ip>:3000/admin`
 4. Click **Sync** on a repo to index it immediately.
 5. The Slack bot is live — users can `@ask-repos` in the configured channels.
 
-The admin UI works even without Slack tokens, so you can configure repos
-first, then add the tokens and restart (`docker compose restart`).
+### Updating
+
+```sh
+# Build locally and deploy
+./gradlew assembleDist
+scp build/distributions/ask-repos-0.1.0.zip app@<server>:~/
+
+# On the server
+rm -rf ask-repos-0.1.0
+unzip ask-repos-0.1.0.zip
+systemctl --user restart ask-repos.service
+```
 
 ### Exit codes
 
