@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Thin wrapper that forwards to the installDist-produced launcher.
+# Build once with `./gradlew installDist`; after that this script is fast.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+LAUNCHER="$SCRIPT_DIR/build/install/ask-repos/bin/ask-repos"
+
+if [ ! -x "$LAUNCHER" ]; then
+  echo "ask-repos: running './gradlew installDist' first..." >&2
+  (cd "$SCRIPT_DIR" && ./gradlew -q installDist)
+fi
+
+exec "$LAUNCHER" "$@"

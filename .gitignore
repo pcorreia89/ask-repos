@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ
+.idea/
+*.iml
+out/
+
+# Local index (if someone runs the tool from inside this repo)
+.ask-repos/
+
+# macOS / editor cruft
+.DS_Store
+*.swp

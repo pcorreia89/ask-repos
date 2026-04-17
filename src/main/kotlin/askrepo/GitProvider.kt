@@ -1,0 +1,176 @@
+package askrepo
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
+import java.util.Base64
+
+data class RemoteFile(val path: String, val content: ByteArray, val size: Long)
+
+interface GitProvider {
+    fun listAndFetchFiles(workspace: String, repo: String, branch: String): List<RemoteFile>
+}
+
+class BitbucketProvider(private val token: String) : GitProvider {
+
+    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()
+    private val json = Json { ignoreUnknownKeys = true }
+    private val baseUrl = "https://api.bitbucket.org/2.0"
+    private val authHeader: String = if (':' in token) {
+        "Basic " + Base64.getEncoder().encodeToString(token.toByteArray())
+    } else {
+        "Bearer $token"
+    }
+
+    override fun listAndFetchFiles(workspace: String, repo: String, branch: String): List<RemoteFile> {
+        val paths = listFiles(workspace, repo, branch)
+        System.err.println("  listed ${paths.size} file(s) from Bitbucket")
+        val out = ArrayList<RemoteFile>()
+        for (p in paths) {
+            if (!Ingest.isIncludedFile(p.path)) continue
+            if (p.size > Defaults.MAX_FILE_BYTES) continue
+            val content = fetchFile(workspace, repo, branch, p.path) ?: continue
+            out.add(RemoteFile(p.path, content, p.size))
+        }
+        System.err.println("  fetched ${out.size} included file(s)")
+        return out
+    }
+
+    private data class FileInfo(val path: String, val size: Long)
+
+    private fun listFiles(workspace: String, repo: String, branch: String): List<FileInfo> {
+        val files = ArrayList<FileInfo>()
+        var url: String? = "$baseUrl/repositories/$workspace/$repo/src/$branch/?pagelen=100&max_depth=20"
+        while (url != null) {
+            val body = get(url)
+            val page = json.decodeFromString(SrcListResponse.serializer(), body)
+            for (entry in page.values) {
+                if (entry.type == "commit_file") {
+                    files.add(FileInfo(entry.path, entry.size ?: 0))
+                }
+            }
+            url = page.next
+        }
+        return files
+    }
+
+    private fun fetchFile(workspace: String, repo: String, branch: String, path: String): ByteArray? {
+        val url = "$baseUrl/repositories/$workspace/$repo/src/$branch/$path"
+        return try {
+            getBytes(url)
+        } catch (t: Throwable) {
+            System.err.println("  skip (fetch error): $path — ${t.message}")
+            null
+        }
+    }
+
+    private fun get(url: String): String {
+        val req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(60))
+            .header("authorization", authHeader)
+            .GET().build()
+        val res = http.send(req, HttpResponse.BodyHandlers.ofString())
+        if (res.statusCode() !in 200..299) error("bitbucket ${res.statusCode()}: ${res.body().take(300)}")
+        return res.body()
+    }
+
+    private fun getBytes(url: String): ByteArray {
+        val req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(60))
+            .header("authorization", authHeader)
+            .GET().build()
+        val res = http.send(req, HttpResponse.BodyHandlers.ofByteArray())
+        if (res.statusCode() !in 200..299) error("bitbucket ${res.statusCode()}")
+        return res.body()
+    }
+
+    @Serializable
+    private data class SrcListResponse(
+        val values: List<SrcEntry> = emptyList(),
+        val next: String? = null,
+    )
+
+    @Serializable
+    private data class SrcEntry(
+        val path: String,
+        val type: String,
+        val size: Long? = null,
+    )
+}
+
+class GitHubProvider(private val token: String) : GitProvider {
+
+    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()
+    private val json = Json { ignoreUnknownKeys = true }
+    private val baseUrl = "https://api.github.com"
+
+    override fun listAndFetchFiles(workspace: String, repo: String, branch: String): List<RemoteFile> {
+        val tree = listTree(workspace, repo, branch)
+        System.err.println("  listed ${tree.size} file(s) from GitHub")
+        val out = ArrayList<RemoteFile>()
+        for (entry in tree) {
+            if (entry.type != "blob") continue
+            if (!Ingest.isIncludedFile(entry.path)) continue
+            if ((entry.size ?: 0) > Defaults.MAX_FILE_BYTES) continue
+            val content = fetchFile(workspace, repo, branch, entry.path) ?: continue
+            out.add(RemoteFile(entry.path, content, entry.size ?: content.size.toLong()))
+        }
+        System.err.println("  fetched ${out.size} included file(s)")
+        return out
+    }
+
+    private fun listTree(owner: String, repo: String, branch: String): List<TreeEntry> {
+        val body = get("$baseUrl/repos/$owner/$repo/git/trees/$branch?recursive=1")
+        val resp = json.decodeFromString(TreeResponse.serializer(), body)
+        return resp.tree
+    }
+
+    private fun fetchFile(owner: String, repo: String, branch: String, path: String): ByteArray? {
+        val url = "$baseUrl/repos/$owner/$repo/contents/$path?ref=$branch"
+        return try {
+            val body = get(url)
+            val resp = json.decodeFromString(ContentsResponse.serializer(), body)
+            if (resp.encoding == "base64" && resp.content != null) {
+                Base64.getMimeDecoder().decode(resp.content)
+            } else null
+        } catch (t: Throwable) {
+            System.err.println("  skip (fetch error): $path — ${t.message}")
+            null
+        }
+    }
+
+    private fun get(url: String): String {
+        val req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(60))
+            .header("authorization", "Bearer $token")
+            .header("accept", "application/vnd.github+json")
+            .GET().build()
+        val res = http.send(req, HttpResponse.BodyHandlers.ofString())
+        if (res.statusCode() !in 200..299) error("github ${res.statusCode()}: ${res.body().take(300)}")
+        return res.body()
+    }
+
+    @Serializable
+    private data class TreeResponse(val tree: List<TreeEntry> = emptyList())
+
+    @Serializable
+    private data class TreeEntry(
+        val path: String,
+        val type: String,
+        val size: Long? = null,
+    )
+
+    @Serializable
+    private data class ContentsResponse(
+        val content: String? = null,
+        val encoding: String? = null,
+    )
+}
