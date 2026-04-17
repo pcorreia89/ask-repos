@@ -14,6 +14,9 @@ out/
 # Local index (if someone runs the tool from inside this repo)
 .ask-repos/
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # macOS / editor cruft
 .DS_Store
 *.swp
