@@ -24,6 +24,7 @@ class AnswerTest {
             slackAppToken = null,
             bitbucketToken = null,
             githubToken = null,
+            syncIntervalMinutes = null,
         )
         val result = Answer.answer(config, dir, "what does this do?")
         assertTrue(result.text.contains("No index found"))

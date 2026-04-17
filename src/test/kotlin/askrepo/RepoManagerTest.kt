@@ -23,6 +23,7 @@ class RepoManagerTest {
         slackAppToken = null,
         bitbucketToken = "bb-token",
         githubToken = "gh-token",
+        syncIntervalMinutes = null,
     )
 
     @Test

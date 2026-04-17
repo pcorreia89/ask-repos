@@ -213,6 +213,21 @@ fun main(args: Array<String>) {
         "serve" -> {
             val config = Config.load(Paths.get("").toAbsolutePath())
             AdminServer.start(config)
+            if (config.syncIntervalMinutes != null && config.syncIntervalMinutes > 0) {
+                Thread({
+                    while (true) {
+                        try {
+                            System.err.println("${LocalDateTime.now()} auto-sync: syncing all repos...")
+                            RepoManager.sync(config)
+                            System.err.println("${LocalDateTime.now()} auto-sync: done")
+                        } catch (t: Throwable) {
+                            System.err.println("${LocalDateTime.now()} auto-sync error: ${t.message}")
+                        }
+                        Thread.sleep(config.syncIntervalMinutes * 60_000L)
+                    }
+                }, "auto-sync").apply { isDaemon = true }.start()
+                System.err.println("auto-sync enabled: every ${config.syncIntervalMinutes} minutes")
+            }
             if (!config.slackBotToken.isNullOrEmpty() && !config.slackAppToken.isNullOrEmpty()) {
                 SlackBot.start(config)
             } else {

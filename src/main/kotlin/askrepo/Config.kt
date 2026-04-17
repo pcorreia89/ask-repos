@@ -53,6 +53,7 @@ data class Config(
     val slackAppToken: String?,
     val bitbucketToken: String?,
     val githubToken: String?,
+    val syncIntervalMinutes: Int?,
 ) {
     companion object {
         fun load(workingDir: Path): Config {
@@ -93,6 +94,7 @@ data class Config(
                 slackAppToken = env["SLACK_APP_TOKEN"]?.takeIf { it.isNotBlank() },
                 bitbucketToken = env["BITBUCKET_TOKEN"]?.takeIf { it.isNotBlank() },
                 githubToken = env["GITHUB_TOKEN"]?.takeIf { it.isNotBlank() },
+                syncIntervalMinutes = env["SYNC_INTERVAL_MINUTES"]?.toIntOrNull(),
             )
         }
     }
