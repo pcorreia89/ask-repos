@@ -54,6 +54,7 @@ data class Config(
     val bitbucketToken: String?,
     val githubToken: String?,
     val syncIntervalMinutes: Int?,
+    val webhookSecret: String?,
 ) {
     companion object {
         fun load(workingDir: Path): Config {
@@ -95,6 +96,7 @@ data class Config(
                 bitbucketToken = env["BITBUCKET_TOKEN"]?.takeIf { it.isNotBlank() },
                 githubToken = env["GITHUB_TOKEN"]?.takeIf { it.isNotBlank() },
                 syncIntervalMinutes = env["SYNC_INTERVAL_MINUTES"]?.toIntOrNull(),
+                webhookSecret = env["WEBHOOK_SECRET"]?.takeIf { it.isNotBlank() },
             )
         }
     }

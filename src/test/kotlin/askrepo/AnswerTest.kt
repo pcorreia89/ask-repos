@@ -25,6 +25,7 @@ class AnswerTest {
             bitbucketToken = null,
             githubToken = null,
             syncIntervalMinutes = null,
+            webhookSecret = null,
         )
         val result = Answer.answer(config, dir, "what does this do?")
         assertTrue(result.text.contains("No index found"))

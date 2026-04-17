@@ -25,6 +25,7 @@ class AdminServerTest {
         bitbucketToken = null,
         githubToken = null,
         syncIntervalMinutes = null,
+        webhookSecret = "test-secret",
     )
 
     private fun adminTest(block: suspend ApplicationTestBuilder.(Config) -> Unit) {
@@ -147,5 +148,36 @@ class AdminServerTest {
         val body = response.bodyAsText()
         assertContains(body, "my-repo")
         assertContains(body, "acme/backend")
+    }
+
+    @Test
+    fun webhookRejectsWithoutSecret() = adminTest { config ->
+        val entries = listOf(RepoEntry("my-repo", "github", "acme", "backend"))
+        RepoManager.saveRegistry(config, RepoRegistry(entries))
+        val response = client.post("/webhook/my-repo")
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun webhookRejectsWrongSecret() = adminTest { config ->
+        val entries = listOf(RepoEntry("my-repo", "github", "acme", "backend"))
+        RepoManager.saveRegistry(config, RepoRegistry(entries))
+        val response = client.post("/webhook/my-repo?secret=wrong")
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun webhookReturnsNotFoundForUnknownRepo() = adminTest { _ ->
+        val response = client.post("/webhook/nonexistent?secret=test-secret")
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    @Test
+    fun webhookTriggersSync() = adminTest { config ->
+        val entries = listOf(RepoEntry("my-repo", "github", "acme", "backend"))
+        RepoManager.saveRegistry(config, RepoRegistry(entries))
+        val response = client.post("/webhook/my-repo?secret=test-secret")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertContains(response.bodyAsText(), "sync started")
     }
 }

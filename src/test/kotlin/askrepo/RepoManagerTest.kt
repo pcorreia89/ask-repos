@@ -24,6 +24,7 @@ class RepoManagerTest {
         bitbucketToken = "bb-token",
         githubToken = "gh-token",
         syncIntervalMinutes = null,
+        webhookSecret = null,
     )
 
     @Test

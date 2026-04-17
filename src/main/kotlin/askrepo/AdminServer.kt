@@ -50,6 +50,39 @@ object AdminServer {
                     call.respondText("ok")
                 }
 
+                post("/webhook/{name}") {
+                    val secret = call.request.queryParameters["secret"]
+                        ?: call.request.headers["X-Webhook-Secret"]
+                    if (config.webhookSecret == null || secret != config.webhookSecret) {
+                        call.respondText("unauthorized", status = HttpStatusCode.Unauthorized)
+                        return@post
+                    }
+                    val name = call.parameters["name"]!!
+                    val registry = RepoManager.loadRegistry(config)
+                    if (registry.repos.none { it.name == name }) {
+                        call.respondText("repo '$name' not found", status = HttpStatusCode.NotFound)
+                        return@post
+                    }
+                    val existing = syncJobs[name]
+                    if (existing != null && !existing.done) {
+                        call.respondText("sync already in progress for '$name'", status = HttpStatusCode.OK)
+                        return@post
+                    }
+                    val job = SyncJob(name)
+                    syncJobs[name] = job
+                    Thread {
+                        try {
+                            RepoManager.sync(config, name) { msg -> job.messages.add(msg) }
+                        } catch (e: Exception) {
+                            job.error = e.message ?: "Unknown error"
+                        } finally {
+                            job.done = true
+                        }
+                    }.start()
+                    System.err.println("webhook: triggered sync for '$name'")
+                    call.respondText("sync started for '$name'", status = HttpStatusCode.OK)
+                }
+
                 authenticate("admin") {
                     get("/admin") {
                         val registry = RepoManager.loadRegistry(config)

@@ -201,6 +201,7 @@ BITBUCKET_TOKEN=...
 ADMIN_USER=admin
 ADMIN_PASSWORD=<change-me>
 SYNC_INTERVAL_MINUTES=30
+WEBHOOK_SECRET=<random-string>
 ```
 
 ### Run with systemd
@@ -249,6 +250,29 @@ rm -rf ask-repos-0.1.0
 unzip ask-repos-0.1.0.zip
 systemctl --user restart ask-repos.service
 ```
+
+### Webhook-triggered sync
+
+Instead of polling with `SYNC_INTERVAL_MINUTES`, you can configure
+GitHub or Bitbucket to POST to a webhook on push:
+
+```
+POST http://<server-ip>:3000/webhook/<repo-name>?secret=<WEBHOOK_SECRET>
+```
+
+The secret can also be sent as an `X-Webhook-Secret` header.
+
+**GitHub:** In your repo settings, add a webhook with:
+- Payload URL: `https://ask-repos.example.com/webhook/my-repo?secret=...`
+- Content type: `application/json`
+- Events: Just the push event
+
+**Bitbucket:** In your repo settings, add a webhook with:
+- URL: `https://ask-repos.example.com/webhook/my-repo?secret=...`
+- Triggers: Repository push
+
+The webhook returns immediately and runs the sync in the background.
+Duplicate requests while a sync is running are ignored.
 
 ### HTTPS with a reverse proxy
 
