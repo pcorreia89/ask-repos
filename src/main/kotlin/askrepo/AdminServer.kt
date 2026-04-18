@@ -180,7 +180,20 @@ object AdminServer {
                                 }
                             }
                             br()
-                            a(href = "/admin/repos/add") { +"+ Add repo" }
+                            div {
+                                style = "display:flex;gap:12px;align-items:center"
+                                a(href = "/admin/repos/add") { +"+ Add repo" }
+                                if (registry.repos.isNotEmpty()) {
+                                    form(action = "/admin/repos/sync-all", method = FormMethod.post) {
+                                        style = "display:inline"
+                                        button(type = ButtonType.submit) {
+                                            style = "background:#2563eb;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:14px"
+                                            attributes["onclick"] = "return confirm('Sync all repos?')"
+                                            +"\u21BB Sync All"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -273,6 +286,90 @@ object AdminServer {
                         }
                     }
 
+                    post("/admin/repos/sync-all") {
+                        val registry = RepoManager.loadRegistry(config)
+                        val repoNames = registry.repos.map { it.name }
+                        if (repoNames.isEmpty()) {
+                            call.respondRedirect("/admin?error=No+repos+configured")
+                            return@post
+                        }
+                        val allKey = "_sync-all"
+                        val existing = syncJobs[allKey]
+                        if (existing != null && !existing.done) {
+                            call.respondRedirect("/admin/repos/sync-all-progress")
+                            return@post
+                        }
+                        val job = SyncJob(allKey)
+                        syncJobs[allKey] = job
+                        val user = call.principal<UserIdPrincipal>()?.name
+                        audit("sync-all-started", repoNames.joinToString(","), user)
+                        Thread {
+                            try {
+                                for (name in repoNames) {
+                                    job.messages.add("--- Syncing $name ---")
+                                    try {
+                                        RepoManager.sync(config, name) { msg -> job.messages.add(msg) }
+                                        job.messages.add("--- $name done ---")
+                                    } catch (e: Exception) {
+                                        job.messages.add("Error syncing $name: ${e.message}")
+                                    }
+                                }
+                            } finally {
+                                job.done = true
+                            }
+                        }.start()
+                        call.respondRedirect("/admin/repos/sync-all-progress")
+                    }
+
+                    get("/admin/repos/sync-all-progress") {
+                        val allKey = "_sync-all"
+                        call.respondPage("Syncing All Repos") {
+                            h1 { +"Syncing All Repos" }
+                            div {
+                                id = "log"
+                                style = "background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;font-family:monospace;font-size:13px;min-height:200px;max-height:400px;overflow-y:auto;white-space:pre-wrap"
+                            }
+                            p {
+                                id = "status"
+                                style = "font-weight:600;margin-top:12px"
+                                +"Connecting..."
+                            }
+                            script {
+                                unsafe {
+                                    raw(
+                                    """
+                                            const log = document.getElementById('log');
+                                            const status = document.getElementById('status');
+                                            const es = new EventSource('/admin/repos/$allKey/sync-events');
+                                            es.onmessage = function(e) {
+                                              log.textContent += e.data + '\n';
+                                              log.scrollTop = log.scrollHeight;
+                                            };
+                                            es.addEventListener('done', function(e) {
+                                              status.textContent = e.data;
+                                              status.style.color = '#16a34a';
+                                              es.close();
+                                            });
+                                            es.addEventListener('error-msg', function(e) {
+                                              status.textContent = e.data;
+                                              status.style.color = '#dc2626';
+                                              es.close();
+                                            });
+                                            es.onerror = function() {
+                                              if (es.readyState === EventSource.CLOSED) return;
+                                              status.textContent = 'Connection lost';
+                                              status.style.color = '#dc2626';
+                                              es.close();
+                                            };
+                                        """.trimIndent()
+                                    )
+                                }
+                            }
+                            br()
+                            a(href = "/admin") { +"\u2190 Back to Dashboard" }
+                        }
+                    }
+
                     post("/admin/repos/{name}/sync") {
                         val name = call.parameters["name"]!!
                         val existing = syncJobs[name]
@@ -312,31 +409,33 @@ object AdminServer {
                             }
                             script {
                                 unsafe {
-                                    raw("""
-const log = document.getElementById('log');
-const status = document.getElementById('status');
-const es = new EventSource('/admin/repos/$name/sync-events');
-es.onmessage = function(e) {
-  log.textContent += e.data + '\n';
-  log.scrollTop = log.scrollHeight;
-};
-es.addEventListener('done', function(e) {
-  status.textContent = e.data;
-  status.style.color = '#16a34a';
-  es.close();
-});
-es.addEventListener('error-msg', function(e) {
-  status.textContent = e.data;
-  status.style.color = '#dc2626';
-  es.close();
-});
-es.onerror = function() {
-  if (es.readyState === EventSource.CLOSED) return;
-  status.textContent = 'Connection lost';
-  status.style.color = '#dc2626';
-  es.close();
-};
-""".trimIndent())
+                                    raw(
+                                    """
+                                            const log = document.getElementById('log');
+                                            const status = document.getElementById('status');
+                                            const es = new EventSource('/admin/repos/$name/sync-events');
+                                            es.onmessage = function(e) {
+                                              log.textContent += e.data + '\n';
+                                              log.scrollTop = log.scrollHeight;
+                                            };
+                                            es.addEventListener('done', function(e) {
+                                              status.textContent = e.data;
+                                              status.style.color = '#16a34a';
+                                              es.close();
+                                            });
+                                            es.addEventListener('error-msg', function(e) {
+                                              status.textContent = e.data;
+                                              status.style.color = '#dc2626';
+                                              es.close();
+                                            });
+                                            es.onerror = function() {
+                                              if (es.readyState === EventSource.CLOSED) return;
+                                              status.textContent = 'Connection lost';
+                                              status.style.color = '#dc2626';
+                                              es.close();
+                                            };
+                                        """.trimIndent()
+                                    )
                                 }
                             }
                             br()
