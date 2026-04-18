@@ -9,19 +9,23 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 
-class EmbeddingsClient(
+enum class EmbedInputType { DOCUMENT, QUERY }
+
+interface EmbeddingClient {
+    fun embed(texts: List<String>, type: EmbedInputType, onBatchProgress: (batch: Int, total: Int) -> Unit = { _, _ -> }): List<FloatArray>
+}
+
+class VoyageEmbeddingsClient(
     private val apiKey: String,
     private val model: String,
     private val endpoint: String = Defaults.VOYAGE_ENDPOINT,
     private val http: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(30))
         .build(),
-) {
+) : EmbeddingClient {
     private val json = Json { ignoreUnknownKeys = true }
 
-    enum class InputType { DOCUMENT, QUERY }
-
-    fun embed(texts: List<String>, type: InputType, onBatchProgress: (batch: Int, total: Int) -> Unit = { _, _ -> }): List<FloatArray> {
+    override fun embed(texts: List<String>, type: EmbedInputType, onBatchProgress: (batch: Int, total: Int) -> Unit): List<FloatArray> {
         if (texts.isEmpty()) return emptyList()
         val batches = texts.chunked(Defaults.EMBED_BATCH_SIZE)
         val out = ArrayList<FloatArray>(texts.size)
@@ -32,19 +36,18 @@ class EmbeddingsClient(
         return out
     }
 
-    private fun embedBatch(batch: List<String>, type: InputType): List<FloatArray> {
+    private fun embedBatch(batch: List<String>, type: EmbedInputType): List<FloatArray> {
         val request = VoyageRequest(
             input = batch,
             model = model,
             inputType = when (type) {
-                InputType.DOCUMENT -> "document"
-                InputType.QUERY -> "query"
+                EmbedInputType.DOCUMENT -> "document"
+                EmbedInputType.QUERY -> "query"
             },
         )
         val body = json.encodeToString(VoyageRequest.serializer(), request)
         val response = postWithRetry(body)
         val parsed = json.decodeFromString(VoyageResponse.serializer(), response)
-        // Voyage returns results in the same order as inputs, with explicit indices.
         val sorted = parsed.data.sortedBy { it.index }
         return sorted.map { item ->
             val arr = FloatArray(item.embedding.size)
@@ -81,7 +84,7 @@ class EmbeddingsClient(
     }
 
     private fun sleepBackoff(attempt: Int) {
-        val ms = 1000L * (1 shl attempt) // 1s, 2s, 4s
+        val ms = 1000L * (1 shl attempt)
         Thread.sleep(ms)
     }
 
@@ -103,4 +106,85 @@ class EmbeddingsClient(
             val embedding: List<Double>,
         )
     }
+}
+
+class OllamaEmbeddingsClient(
+    private val model: String = Defaults.OLLAMA_MODEL,
+    private val baseUrl: String = Defaults.OLLAMA_BASE_URL,
+    private val http: HttpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(30))
+        .build(),
+) : EmbeddingClient {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    override fun embed(texts: List<String>, type: EmbedInputType, onBatchProgress: (batch: Int, total: Int) -> Unit): List<FloatArray> {
+        if (texts.isEmpty()) return emptyList()
+        val batches = texts.chunked(Defaults.EMBED_BATCH_SIZE)
+        val out = ArrayList<FloatArray>(texts.size)
+        for ((i, batch) in batches.withIndex()) {
+            onBatchProgress(i + 1, batches.size)
+            out.addAll(embedBatch(batch, type))
+        }
+        return out
+    }
+
+    private fun embedBatch(batch: List<String>, type: EmbedInputType): List<FloatArray> {
+        val prefix = when (type) {
+            EmbedInputType.DOCUMENT -> "search_document: "
+            EmbedInputType.QUERY -> "search_query: "
+        }
+        val prefixed = batch.map { prefix + it }
+        val request = OllamaRequest(model = model, input = prefixed)
+        val body = json.encodeToString(OllamaRequest.serializer(), request)
+        val response = postWithRetry(body)
+        val parsed = json.decodeFromString(OllamaResponse.serializer(), response)
+        return parsed.embeddings.map { embedding ->
+            val arr = FloatArray(embedding.size)
+            for (i in embedding.indices) arr[i] = embedding[i].toFloat()
+            arr
+        }
+    }
+
+    private fun postWithRetry(body: String): String {
+        var lastError: String? = null
+        for (attempt in 0 until Defaults.HTTP_RETRIES) {
+            val req = HttpRequest.newBuilder()
+                .uri(URI.create("$baseUrl/api/embed"))
+                .timeout(Duration.ofSeconds(120))
+                .header("content-type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build()
+            val res = try {
+                http.send(req, HttpResponse.BodyHandlers.ofString())
+            } catch (t: Throwable) {
+                lastError = "transport: ${t.message}"
+                sleepBackoff(attempt)
+                continue
+            }
+            val status = res.statusCode()
+            if (status in 200..299) return res.body()
+            val shouldRetry = status == 429 || status in 500..599
+            lastError = "http $status: ${res.body().take(300)}"
+            if (!shouldRetry) break
+            sleepBackoff(attempt)
+        }
+        error("ollama embeddings failed after ${Defaults.HTTP_RETRIES} attempts: $lastError")
+    }
+
+    private fun sleepBackoff(attempt: Int) {
+        val ms = 1000L * (1 shl attempt)
+        Thread.sleep(ms)
+    }
+
+    @Serializable
+    private data class OllamaRequest(
+        val model: String,
+        val input: List<String>,
+    )
+
+    @Serializable
+    private data class OllamaResponse(
+        val model: String? = null,
+        val embeddings: List<List<Double>>,
+    )
 }

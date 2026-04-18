@@ -12,8 +12,11 @@ class AnswerTest {
         val config = Config(
             anthropicApiKey = "test",
             voyageApiKey = "test",
+            embeddingProvider = EmbeddingProvider.VOYAGE,
             anthropicModel = "model",
             voyageModel = "model",
+            ollamaModel = Defaults.OLLAMA_MODEL,
+            ollamaBaseUrl = Defaults.OLLAMA_BASE_URL,
             topK = 5,
             maxTokens = 512,
             indexBase = dir,

@@ -37,8 +37,8 @@ Rules:
         require(dim == manifest.dim) { "manifest dim ${manifest.dim} != vectors.bin dim $dim" }
         require(vectors.size == chunks.size) { "vectors/chunks length mismatch" }
 
-        val embedClient = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
-        val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
+        val embedClient = config.createEmbeddingClient()
+        val queryVec = embedClient.embed(listOf(question), EmbedInputType.QUERY).first()
         require(queryVec.size == dim) { "query vector dim ${queryVec.size} != index dim $dim" }
 
         val hits = Retrieve.topKHybrid(question, queryVec, chunks, vectors, config.topK)
@@ -64,8 +64,8 @@ Rules:
         require(dim == manifest.dim) { "manifest dim ${manifest.dim} != vectors.bin dim $dim" }
         require(vectors.size == chunks.size) { "vectors/chunks length mismatch" }
 
-        val embedClient = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
-        val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
+        val embedClient = config.createEmbeddingClient()
+        val queryVec = embedClient.embed(listOf(question), EmbedInputType.QUERY).first()
         require(queryVec.size == dim) { "query vector dim ${queryVec.size} != index dim $dim" }
 
         val hits = Retrieve.topKHybrid(question, queryVec, chunks, vectors, config.topK)

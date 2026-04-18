@@ -23,7 +23,7 @@ Key files:
 - `AdminServer.kt` — Ktor HTTP server: admin UI, webhook endpoint, SSE sync progress
 - `SlackBot.kt` — Slack Bolt SDK socket-mode bot
 - `Ingest.kt` / `Chunking.kt` — repo walking, chunking (code + markdown aware)
-- `Anthropic.kt` / `Embeddings.kt` — Claude and Voyage AI HTTP clients
+- `Anthropic.kt` / `Embeddings.kt` — Claude and embedding HTTP clients (Voyage AI + Ollama)
 - `Retrieve.kt` — hybrid BM25 + cosine similarity retrieval
 - `Store.kt` — on-disk index format (manifest.json, chunks.jsonl, vectors.bin)
 - `Config.kt` — env var / `.env` parsing
@@ -47,8 +47,9 @@ Key files:
 
 ## Environment
 
-Required: `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY` (in env or `.env` file).
-See `.env.example` for all optional variables.
+Required: `ANTHROPIC_API_KEY` (in env or `.env` file).
+Embeddings default to Ollama (`nomic-embed-text`). Set `EMBEDDING_PROVIDER=voyage` and `VOYAGE_API_KEY` for Voyage.
+See `.env.example` for all optional variables (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, etc.).
 
 ## Security Conventions
 

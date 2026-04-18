@@ -12,8 +12,11 @@ class AdminServerTest {
     private fun testConfig(base: java.nio.file.Path): Config = Config(
         anthropicApiKey = "test-key",
         voyageApiKey = "test-key",
+        embeddingProvider = EmbeddingProvider.VOYAGE,
         anthropicModel = Defaults.ANTHROPIC_MODEL,
         voyageModel = Defaults.VOYAGE_MODEL,
+        ollamaModel = Defaults.OLLAMA_MODEL,
+        ollamaBaseUrl = Defaults.OLLAMA_BASE_URL,
         topK = Defaults.TOP_K,
         maxTokens = Defaults.MAX_TOKENS,
         indexBase = base.resolve("indexes"),

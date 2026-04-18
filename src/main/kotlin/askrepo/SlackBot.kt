@@ -177,8 +177,8 @@ object SlackBot {
     }
 
     private fun detectRepo(config: Config, question: String, repos: List<String>): String? {
-        val embedClient = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
-        val queryVec = embedClient.embed(listOf(question), EmbeddingsClient.InputType.QUERY).first()
+        val embedClient = config.createEmbeddingClient()
+        val queryVec = embedClient.embed(listOf(question), EmbedInputType.QUERY).first()
         var bestRepo: String? = null
         var bestScore = 0f
         for (name in repos) {

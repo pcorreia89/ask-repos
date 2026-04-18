@@ -176,8 +176,8 @@ object Ingest {
         if (toEmbed.isNotEmpty()) {
             val totalBatches = (toEmbed.size + Defaults.EMBED_BATCH_SIZE - 1) / Defaults.EMBED_BATCH_SIZE
             onProgress("Embedding ${toEmbed.size} chunks ($totalBatches batches)...")
-            val client = EmbeddingsClient(config.voyageApiKey, config.voyageModel)
-            val embedded = client.embed(toEmbed.map { it.text }, EmbeddingsClient.InputType.DOCUMENT) { batch, total ->
+            val client = config.createEmbeddingClient()
+            val embedded = client.embed(toEmbed.map { it.text }, EmbedInputType.DOCUMENT) { batch, total ->
                 onProgress("Embedding batch $batch/$total...")
             }
             require(embedded.size == toEmbed.size) { "embedding count mismatch" }
@@ -203,7 +203,7 @@ object Ingest {
         val manifest = Manifest(
             repoPath = repoLabel,
             model = config.anthropicModel,
-            embeddingModel = config.voyageModel,
+            embeddingModel = config.embeddingModelName,
             dim = dim,
             createdAt = priorManifest?.createdAt ?: now,
             updatedAt = now,

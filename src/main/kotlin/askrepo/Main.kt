@@ -31,8 +31,11 @@ fun printUsage() {
         |      Start the Slack bot (requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN).
         |
         |Environment:
-        |  ANTHROPIC_API_KEY   required
-        |  VOYAGE_API_KEY      required
+        |  ANTHROPIC_API_KEY      required
+        |  EMBEDDING_PROVIDER     ollama (default) or voyage
+        |  OLLAMA_BASE_URL        Ollama server URL (default: http://localhost:11434)
+        |  OLLAMA_MODEL           Ollama model name (default: nomic-embed-text)
+        |  VOYAGE_API_KEY         required when EMBEDDING_PROVIDER=voyage
         |  See .env.example for optional overrides.
         """.trimMargin()
     )

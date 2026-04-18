@@ -6,6 +6,8 @@ import java.nio.file.Path
 object Defaults {
     const val ANTHROPIC_MODEL = "claude-haiku-4-5"
     const val VOYAGE_MODEL = "voyage-code-3"
+    const val OLLAMA_MODEL = "nomic-embed-text"
+    const val OLLAMA_BASE_URL = "http://localhost:11434"
     const val TOP_K = 12
     const val MAX_TOKENS = 1024
 
@@ -38,11 +40,16 @@ object Defaults {
     )
 }
 
+enum class EmbeddingProvider { VOYAGE, OLLAMA }
+
 data class Config(
     val anthropicApiKey: String,
-    val voyageApiKey: String,
+    val voyageApiKey: String?,
+    val embeddingProvider: EmbeddingProvider,
     val anthropicModel: String,
     val voyageModel: String,
+    val ollamaModel: String,
+    val ollamaBaseUrl: String,
     val topK: Int,
     val maxTokens: Int,
     val indexBase: Path,
@@ -56,6 +63,21 @@ data class Config(
     val syncIntervalMinutes: Int?,
     val webhookSecret: String?,
 ) {
+    fun createEmbeddingClient(): EmbeddingClient = when (embeddingProvider) {
+        EmbeddingProvider.VOYAGE -> {
+            val key = voyageApiKey
+                ?: error("VOYAGE_API_KEY is required when EMBEDDING_PROVIDER=voyage")
+            VoyageEmbeddingsClient(key, voyageModel)
+        }
+        EmbeddingProvider.OLLAMA -> OllamaEmbeddingsClient(ollamaModel, ollamaBaseUrl)
+    }
+
+    val embeddingModelName: String
+        get() = when (embeddingProvider) {
+            EmbeddingProvider.VOYAGE -> voyageModel
+            EmbeddingProvider.OLLAMA -> ollamaModel
+        }
+
     companion object {
         fun load(workingDir: Path): Config {
             val env = HashMap<String, String>()
@@ -68,13 +90,25 @@ data class Config(
             }
 
             val anthropic = env["ANTHROPIC_API_KEY"].orEmpty().trim()
-            val voyage = env["VOYAGE_API_KEY"].orEmpty().trim()
-            if (anthropic.isEmpty() || voyage.isEmpty()) {
+            if (anthropic.isEmpty()) {
                 System.err.println(
-                    "error: ANTHROPIC_API_KEY and VOYAGE_API_KEY must be set " +
+                    "error: ANTHROPIC_API_KEY must be set " +
                         "(in the environment or in ./.env). See .env.example."
                 )
                 kotlin.system.exitProcess(2)
+            }
+
+            val providerStr = env["EMBEDDING_PROVIDER"]?.trim()?.lowercase() ?: ""
+            val voyage = env["VOYAGE_API_KEY"].orEmpty().trim().ifEmpty { null }
+            val provider = when {
+                providerStr == "ollama" -> EmbeddingProvider.OLLAMA
+                providerStr == "voyage" -> EmbeddingProvider.VOYAGE
+                providerStr.isEmpty() && voyage != null -> EmbeddingProvider.VOYAGE
+                providerStr.isEmpty() -> EmbeddingProvider.OLLAMA
+                else -> {
+                    System.err.println("error: EMBEDDING_PROVIDER must be 'voyage' or 'ollama', got '$providerStr'")
+                    kotlin.system.exitProcess(2)
+                }
             }
 
             val defaultBase = Path.of(System.getProperty("user.home"), ".ask-repos", "indexes")
@@ -84,10 +118,15 @@ data class Config(
                 adminPort = env["ADMIN_PORT"]?.toIntOrNull() ?: 3000,
                 anthropicApiKey = anthropic,
                 voyageApiKey = voyage,
+                embeddingProvider = provider,
                 anthropicModel = env["ANTHROPIC_MODEL"]?.takeIf { it.isNotBlank() }
                     ?: Defaults.ANTHROPIC_MODEL,
                 voyageModel = env["VOYAGE_MODEL"]?.takeIf { it.isNotBlank() }
                     ?: Defaults.VOYAGE_MODEL,
+                ollamaModel = env["OLLAMA_MODEL"]?.takeIf { it.isNotBlank() }
+                    ?: Defaults.OLLAMA_MODEL,
+                ollamaBaseUrl = env["OLLAMA_BASE_URL"]?.takeIf { it.isNotBlank() }
+                    ?: Defaults.OLLAMA_BASE_URL,
                 topK = env["ASK_REPOS_TOP_K"]?.toIntOrNull() ?: Defaults.TOP_K,
                 maxTokens = env["ASK_REPOS_MAX_TOKENS"]?.toIntOrNull() ?: Defaults.MAX_TOKENS,
                 indexBase = Path.of(env["ASK_REPOS_INDEX_BASE"] ?: defaultBase.toString()),

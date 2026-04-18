@@ -9,7 +9,8 @@ code and documentation.
 1. **Ingest** walks a repo, skips files git would ignore, chunks the
    remaining text (markdown-aware for docs, blank-line-block-aware for
    code, recursive-character for anything else), embeds each chunk with
-   Voyage `voyage-code-3`, and writes an index.
+   Ollama `nomic-embed-text` (or optionally Voyage `voyage-code-3`),
+   and writes an index.
 2. **Ask** embeds your question, picks the top-12 most similar chunks by
    cosine similarity, hands them to Claude (`claude-haiku-4-5`) with a
    strict "cite sources or say you don't know" prompt, and returns the
@@ -22,7 +23,7 @@ code and documentation.
 - **JDK 21** — `java -version` must report 21.x.
 - **API keys**
   - `ANTHROPIC_API_KEY` (https://console.anthropic.com/)
-  - `VOYAGE_API_KEY` (https://www.voyageai.com/)
+  - `VOYAGE_API_KEY` (https://www.voyageai.com/) — only needed if using `EMBEDDING_PROVIDER=voyage`. By default, embeddings run locally via Ollama (see [Embedding providers](#embedding-providers)).
 - **Slack tokens** (only for the bot)
   - `SLACK_BOT_TOKEN` (starts with `xoxb-`)
   - `SLACK_APP_TOKEN` (starts with `xapp-`)
@@ -163,12 +164,82 @@ In Slack, mention the bot with a question:
    `SLACK_BOT_TOKEN`.
 6. Add both tokens to `.env` and run `./ask-repos serve`.
 
+## Embedding providers
+
+ask-repos defaults to [Ollama](https://ollama.com) with `nomic-embed-text`
+for embeddings — free, open-source, and runs locally. Voyage AI is
+available as an optional paid alternative with slightly better code search
+quality.
+
+### Ollama (default)
+
+```sh
+# 1. Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Pull the embedding model
+ollama pull nomic-embed-text
+```
+
+That's it — no API key or `.env` configuration needed. Ollama runs on
+`http://localhost:11434` by default.
+
+Optional overrides in `.env`:
+
+```sh
+# OLLAMA_BASE_URL=http://localhost:11434   # default
+# OLLAMA_MODEL=nomic-embed-text            # default
+```
+
+### Voyage AI (optional)
+
+For higher-quality code embeddings, set `EMBEDDING_PROVIDER=voyage` and
+provide a Voyage API key:
+
+```sh
+EMBEDDING_PROVIDER=voyage
+VOYAGE_API_KEY=...
+```
+
+### EC2 / server setup for Ollama
+
+```sh
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull the model
+ollama pull nomic-embed-text
+
+# Ollama runs as a systemd service automatically after install.
+# Verify it's running:
+systemctl status ollama
+
+# If not started:
+sudo systemctl enable --now ollama
+```
+
+Ollama listens on `http://localhost:11434` by default. If running Ollama
+on a separate host, set `OLLAMA_BASE_URL=http://<ollama-host>:11434` in
+your `ask-repos.env`.
+
+### Trade-offs
+
+- **Quality:** `nomic-embed-text` is slightly below Voyage `voyage-code-3`
+  for code search, but the hybrid BM25 + vector retrieval compensates
+  for most of the gap.
+- **Speed:** Depends on your hardware. A CPU-only EC2 instance is slower
+  than the Voyage API; a GPU instance is comparable.
+- **Cost:** Ollama is free (no API fees), but requires compute resources.
+  Voyage charges per token.
+- **Index compatibility:** Switching providers requires re-ingesting all
+  repos (vector dimensions and spaces differ).
+
 ## Deployment
 
 ### What you need
 
 - An EC2 instance (or any Linux host) with **Java 21** (JRE) installed.
-- API keys: `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`.
+- API keys: `ANTHROPIC_API_KEY`. Embeddings default to Ollama (see [Embedding providers](#embedding-providers)).
 - Git provider token(s): `GITHUB_TOKEN` and/or `BITBUCKET_TOKEN`.
 - Slack app tokens: `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` (see [Slack app setup](#slack-app-setup) below).
 
@@ -193,7 +264,7 @@ Create a `.env` file on the server (e.g. `~/ask-repos.env`):
 
 ```sh
 ANTHROPIC_API_KEY=...
-VOYAGE_API_KEY=...
+# VOYAGE_API_KEY=...              # only if EMBEDDING_PROVIDER=voyage
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 GITHUB_TOKEN=...
@@ -202,6 +273,7 @@ ADMIN_USER=admin
 ADMIN_PASSWORD=<change-me>
 SYNC_INTERVAL_MINUTES=30
 WEBHOOK_SECRET=<random-string>
+# EMBEDDING_PROVIDER=voyage       # uncomment to use Voyage instead of Ollama (default)
 ```
 
 ### Run with systemd
@@ -356,6 +428,12 @@ Non-obvious choices and their rationale.
   exact keyword matches; BM25 alone misses semantic similarity. The
   hybrid scorer normalises both into [0,1] and combines them with a
   tunable alpha weight, giving better recall than either alone.
+- **Pluggable embedding provider (Voyage / Ollama).** `EmbeddingClient`
+  interface with `VoyageEmbeddingsClient` and `OllamaEmbeddingsClient`
+  implementations. Ollama uses `nomic-embed-text` with the model's
+  `search_document:` / `search_query:` prefix convention for optimal
+  retrieval quality. Switching providers requires re-indexing since
+  vector dimensions and spaces differ.
 - **Voyage batching at 64 chunks per request, retry 1s / 2s / 4s on 429
   and 5xx.**
 - **Anthropic client supports both streaming and non-streaming.** The
