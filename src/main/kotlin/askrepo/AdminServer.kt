@@ -123,7 +123,20 @@ object AdminServer {
                             h1 { +"ask-repos Admin" }
                             p { +"Indexed repos: ${indexed.size} | Registered repos: ${registry.repos.size}" }
 
-                            h2 { +"Repos" }
+                            div {
+                                style = "display:flex;align-items:center;gap:12px;margin-top:28px"
+                                h2 { style = "margin:0"; +"Repos" }
+                                if (registry.repos.isNotEmpty()) {
+                                    form(action = "/admin/repos/sync-all", method = FormMethod.post) {
+                                        style = "display:inline"
+                                        button(type = ButtonType.submit) {
+                                            style = "background:#2563eb;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:14px"
+                                            attributes["onclick"] = "return confirm('Sync all repos?')"
+                                            +"\u21BB Sync All"
+                                        }
+                                    }
+                                }
+                            }
                             if (registry.repos.isEmpty()) {
                                 p { +"No repos configured yet. "; a(href = "/admin/repos/add") { +"Add one." } }
                             } else {
@@ -180,20 +193,7 @@ object AdminServer {
                                 }
                             }
                             br()
-                            div {
-                                style = "display:flex;gap:12px;align-items:center"
-                                a(href = "/admin/repos/add") { +"+ Add repo" }
-                                if (registry.repos.isNotEmpty()) {
-                                    form(action = "/admin/repos/sync-all", method = FormMethod.post) {
-                                        style = "display:inline"
-                                        button(type = ButtonType.submit) {
-                                            style = "background:#2563eb;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:14px"
-                                            attributes["onclick"] = "return confirm('Sync all repos?')"
-                                            +"\u21BB Sync All"
-                                        }
-                                    }
-                                }
-                            }
+                            a(href = "/admin/repos/add") { +"+ Add repo" }
                         }
                     }
 
