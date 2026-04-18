@@ -175,13 +175,19 @@ quality.
 
 ```sh
 # 1. Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+brew install ollama            # macOS
+# or
+curl -fsSL https://ollama.com/install.sh | sh   # Linux
 
-# 2. Pull the embedding model
+# 2. Start the Ollama server (macOS: the app starts it automatically,
+#    Linux install script sets up a systemd service)
+ollama serve                   # if not already running
+
+# 3. Pull the embedding model
 ollama pull nomic-embed-text
 ```
 
-That's it — no API key or `.env` configuration needed. Ollama runs on
+That's it — no API key or `.env` configuration needed. Ollama serves on
 `http://localhost:11434` by default.
 
 Optional overrides in `.env`:
@@ -207,15 +213,18 @@ VOYAGE_API_KEY=...
 # Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Pull the model
+# The install script registers a systemd service that starts automatically.
+# Pull the model:
 ollama pull nomic-embed-text
 
-# Ollama runs as a systemd service automatically after install.
-# Verify it's running:
+# Verify the server is running:
 systemctl status ollama
 
 # If not started:
 sudo systemctl enable --now ollama
+
+# Test it:
+curl http://localhost:11434/api/tags
 ```
 
 Ollama listens on `http://localhost:11434` by default. If running Ollama
